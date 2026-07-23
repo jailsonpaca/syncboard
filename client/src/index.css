@@ -82,15 +82,21 @@ body {
 
 .update-banner {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 10px;
   background: linear-gradient(120deg, rgba(0, 206, 201, 0.12), rgba(108, 92, 231, 0.16));
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px 14px;
   margin-bottom: 14px;
+}
+
+.update-banner-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .update-banner strong {
@@ -106,6 +112,59 @@ body {
 .update-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.update-progress-block {
+  display: grid;
+  gap: 6px;
+}
+
+.update-progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.update-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.update-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #00cec9, #6c5ce7);
+  transition: width 0.2s ease;
+}
+
+.update-progress-fill.installing {
+  background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+}
+
+.update-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #ff6b6b;
+}
+
+.whats-new-body {
+  margin: 12px 0 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--text);
+  max-height: 50dvh;
+  overflow: auto;
 }
 
 .pair-panel {

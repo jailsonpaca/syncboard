@@ -8,6 +8,7 @@ export type LatestManifest = {
   version: string;
   publishedAt?: string;
   downloadPage?: string;
+  releaseNotes?: string;
   github?: { owner: string; repo: string; tag?: string };
   assets?: {
     macDmg?: string | null;
@@ -133,6 +134,7 @@ export async function fetchLatestManifest(force = false): Promise<LatestManifest
           version,
           publishedAt: String(data.published_at || ''),
           downloadPage: cfg.downloadUrl,
+          releaseNotes: String(data.body || '').trim(),
           github: { owner, repo, tag: String(data.tag_name) },
           assets: {
             macDmg: find(/\.dmg$/i),
@@ -141,6 +143,7 @@ export async function fetchLatestManifest(force = false): Promise<LatestManifest
             linuxTar: find(/\.tar\.gz$/i),
             winSetup: find(/\.exe$/i),
             winZip: find(/-win\.zip$/i),
+            androidApk: find(/\.apk$/i),
           },
           roadmap: {
             android: {
@@ -171,6 +174,7 @@ export async function getUpdateStatus(force = false) {
     latest: latest?.version || null,
     updateAvailable,
     downloadPage: latest?.downloadPage || readReleaseConfig().downloadUrl || null,
+    releaseNotes: latest?.releaseNotes || null,
     assets: latest?.assets || null,
     publishedAt: latest?.publishedAt || null,
     checkedAt: cache.checkedAt,

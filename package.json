@@ -1,6 +1,6 @@
 {
   "name": "syncboard",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "description": "Clipboard sync across Mac, Linux and Android on local network",
   "scripts": {

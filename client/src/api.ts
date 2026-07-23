@@ -367,6 +367,7 @@ export type UpdateStatus = {
   latest: string | null;
   updateAvailable: boolean;
   downloadPage: string | null;
+  releaseNotes?: string | null;
   assets: {
     macDmg?: string | null;
     macZip?: string | null;

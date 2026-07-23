@@ -25,7 +25,7 @@ const offlineCache = require('./offline-cache');
 const { createOfflineHub } = require('./offline-hub');
 const { simulatePaste, sleep } = require('./paste');
 const { discoverByCode, discoverServers, parseJoinPayload } = require('./pair-discover');
-const { setupUpdater, loadReleaseConfig } = require('./updater');
+const { setupUpdater, loadReleaseConfig, fetchGithubReleaseNotes } = require('./updater');
 const {
   readClipboardFilePaths,
   writeClipboardFilePaths,
@@ -107,9 +107,18 @@ let remoteFailStreak = 0;
 let preferredRemoteUrl = null;
 let pinnedItems = [];
 let historyItems = [];
-let updateInfo = null; // { version, downloaded }
+/** @type {null | {
+ *   version: string,
+ *   downloaded: boolean,
+ *   releaseNotes?: string,
+ *   phase?: 'idle' | 'downloading' | 'installing' | 'error',
+ *   progress?: number,
+ *   error?: string | null,
+ * }} */
+let updateInfo = null;
 let updaterApi = null;
 let updateCheckTimer = null;
+let updateBusy = false;
 
 const isMac = process.platform === 'darwin';
 const isLinux = process.platform === 'linux';
@@ -1337,6 +1346,10 @@ function broadcastUpdateToWindows() {
     downloaded: Boolean(updateInfo?.downloaded),
     appVersion: app.getVersion(),
     downloadPage: loadReleaseConfig().downloadUrl || null,
+    releaseNotes: updateInfo?.releaseNotes || '',
+    phase: updateInfo?.phase || (updateInfo?.downloaded ? 'ready' : 'idle'),
+    progress: Number(updateInfo?.progress) || 0,
+    error: updateInfo?.error || null,
   };
   for (const win of [mainWindow, compactWindow, prefsWindow]) {
     if (win && !win.isDestroyed()) {
@@ -1345,13 +1358,64 @@ function broadcastUpdateToWindows() {
   }
 }
 
+async function ensureReleaseNotes() {
+  if (!updateInfo?.version) return '';
+  if (updateInfo.releaseNotes) return updateInfo.releaseNotes;
+  const notes = await fetchGithubReleaseNotes(updateInfo.version);
+  if (notes) {
+    updateInfo = { ...updateInfo, releaseNotes: notes };
+    broadcastUpdateToWindows();
+  }
+  return notes || '';
+}
+
 async function downloadAndNotifyUpdate() {
-  if (!updaterApi || !updateInfo) return;
+  if (!updaterApi || !updateInfo || updateBusy) {
+    return { ok: false, error: 'Nenhuma atualização disponível' };
+  }
+  updateBusy = true;
   try {
+    updateInfo = {
+      ...updateInfo,
+      phase: 'downloading',
+      progress: 0,
+      error: null,
+      downloaded: false,
+    };
+    broadcastUpdateToWindows();
     notifyUser('SyncBoard', `Baixando versão ${updateInfo.version}…`);
     await updaterApi.download();
+
+    updateInfo = {
+      ...updateInfo,
+      downloaded: true,
+      phase: 'installing',
+      progress: 100,
+      error: null,
+    };
+    broadcastUpdateToWindows();
+    notifyUser('SyncBoard', `Instalando versão ${updateInfo.version}…`);
+
+    // pequena animação de “instalação” antes do quit
+    for (const step of [15, 40, 70, 100]) {
+      updateInfo = { ...updateInfo, phase: 'installing', progress: step };
+      broadcastUpdateToWindows();
+      await new Promise((r) => setTimeout(r, 180));
+    }
+
+    updaterApi.install();
+    return { ok: true };
   } catch (err) {
-    dialog.showErrorBox('SyncBoard', `Falha ao baixar update: ${err.message}`);
+    updateInfo = {
+      ...updateInfo,
+      phase: 'error',
+      error: err.message,
+      progress: 0,
+    };
+    broadcastUpdateToWindows();
+    return { ok: false, error: err.message };
+  } finally {
+    updateBusy = false;
   }
 }
 
@@ -1376,16 +1440,52 @@ function initUpdater() {
   updaterApi = setupUpdater({
     getAutoCheck: () => getConfig('autoUpdate') !== false,
     onUpdateAvailable: (info) => {
-      updateInfo = { version: info.version, downloaded: false };
+      updateInfo = {
+        version: info.version,
+        downloaded: false,
+        releaseNotes: info.releaseNotes || updateInfo?.releaseNotes || '',
+        phase: 'idle',
+        progress: 0,
+        error: null,
+      };
       updateTrayMenu();
       broadcastUpdateToWindows();
+      void ensureReleaseNotes();
       notifyUser('SyncBoard', `Nova versão ${info.version} disponível`);
     },
+    onDownloadProgress: (p) => {
+      if (!updateInfo) return;
+      updateInfo = {
+        ...updateInfo,
+        phase: 'downloading',
+        progress: Math.max(0, Math.min(100, Math.round(p.percent))),
+        error: null,
+      };
+      broadcastUpdateToWindows();
+    },
     onUpdateDownloaded: (info) => {
-      updateInfo = { version: info.version, downloaded: true };
+      updateInfo = {
+        version: info.version,
+        downloaded: true,
+        releaseNotes: info.releaseNotes || updateInfo?.releaseNotes || '',
+        phase: updateBusy ? 'installing' : 'ready',
+        progress: 100,
+        error: null,
+      };
       updateTrayMenu();
       broadcastUpdateToWindows();
-      notifyUser('SyncBoard', `Versão ${info.version} pronta — clique para instalar`);
+      if (!updateBusy) {
+        notifyUser('SyncBoard', `Versão ${info.version} pronta — clique para instalar`);
+      }
+    },
+    onError: (err) => {
+      if (!updateInfo) return;
+      updateInfo = {
+        ...updateInfo,
+        phase: 'error',
+        error: err.message,
+      };
+      broadcastUpdateToWindows();
     },
   });
 }
@@ -1528,14 +1628,39 @@ ipcMain.handle('join-with-code', async (_e, raw) => {
   }
 });
 
-ipcMain.handle('check-update', async () => checkForAppUpdate(true));
-ipcMain.handle('download-update', async () => {
-  await downloadAndNotifyUpdate();
-  return { ok: true };
+ipcMain.handle('check-update', async () => {
+  const info = await checkForAppUpdate(true);
+  if (info && !updateInfo) {
+    updateInfo = {
+      version: info.version,
+      downloaded: false,
+      releaseNotes: info.releaseNotes || '',
+      phase: 'idle',
+      progress: 0,
+      error: null,
+    };
+    broadcastUpdateToWindows();
+  }
+  await ensureReleaseNotes();
+  return {
+    ok: true,
+    updateAvailable: Boolean(updateInfo),
+    version: updateInfo?.version || null,
+    releaseNotes: updateInfo?.releaseNotes || '',
+  };
 });
+ipcMain.handle('download-update', async () => downloadAndNotifyUpdate());
 ipcMain.handle('install-update', () => {
   updaterApi?.install();
   return { ok: true };
+});
+ipcMain.handle('get-update-notes', async () => {
+  const notes = await ensureReleaseNotes();
+  return {
+    ok: true,
+    version: updateInfo?.version || null,
+    releaseNotes: notes,
+  };
 });
 
 app.on('second-instance', () => {

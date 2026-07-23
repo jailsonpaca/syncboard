@@ -58,13 +58,9 @@ class WsClient(
                 _connected.tryEmit(true)
                 scope.launch {
                     val name = runCatching { deviceNameProvider() }.getOrDefault("Android")
-                    val payload = json.encodeToString(
-                        kotlinx.serialization.json.buildJsonObject {
-                            put("type", kotlinx.serialization.json.JsonPrimitive("hello"))
-                            put("deviceName", kotlinx.serialization.json.JsonPrimitive(name))
-                        }
-                    )
-                    webSocket.send(payload)
+                        .replace("\\", "\\\\")
+                        .replace("\"", "\\\"")
+                    webSocket.send("""{"type":"hello","deviceName":"$name"}""")
                 }
             }
 

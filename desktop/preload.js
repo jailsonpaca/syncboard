@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('syncboard', {
   checkUpdate: () => ipcRenderer.invoke('check-update'),
   downloadUpdate: () => ipcRenderer.invoke('download-update'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
+  getUpdateNotes: () => ipcRenderer.invoke('get-update-notes'),
   onUpdateStatus: (cb) => {
     const handler = (_e, data) => cb(data);
     ipcRenderer.on('update-status', handler);

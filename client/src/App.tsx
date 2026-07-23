@@ -131,7 +131,14 @@ export default function App() {
   const [desktopUpdate, setDesktopUpdate] = useState<{
     version: string;
     downloaded: boolean;
+    releaseNotes?: string;
+    phase?: string;
+    progress?: number;
+    error?: string | null;
   } | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+  const [whatsNewNotes, setWhatsNewNotes] = useState('');
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -321,15 +328,40 @@ export default function App() {
     if (!window.syncboard?.onUpdateStatus) return;
     return window.syncboard.onUpdateStatus((data) => {
       if (data.updateAvailable && data.version) {
+        const phase = data.phase || 'idle';
         setDesktopUpdate({
           version: data.version,
           downloaded: Boolean(data.downloaded),
+          releaseNotes: data.releaseNotes || '',
+          phase,
+          progress: data.progress ?? 0,
+          error: data.error ?? null,
         });
+        setUpdateBusy(phase === 'downloading' || phase === 'installing');
       } else {
         setDesktopUpdate(null);
+        setUpdateBusy(false);
       }
     });
   }, []);
+
+  // No Electron: se o servidor avisou update, força check do auto-updater
+  useEffect(() => {
+    if (!window.syncboard?.checkUpdate) return;
+    if (!updateStatus?.updateAvailable) return;
+    if (desktopUpdate) return;
+    void window.syncboard.checkUpdate().then((res) => {
+      if (res?.updateAvailable && res.version) {
+        setDesktopUpdate({
+          version: res.version,
+          downloaded: false,
+          releaseNotes: res.releaseNotes || '',
+          phase: 'idle',
+          progress: 0,
+        });
+      }
+    });
+  }, [updateStatus?.updateAvailable, desktopUpdate]);
 
   useEffect(() => {
     const disconnect = connectWebSocket({
@@ -577,6 +609,46 @@ export default function App() {
     }
   };
 
+  const updateVersion = desktopUpdate?.version || updateStatus?.latest || '';
+  const showUpdateBanner = Boolean(
+    !isCompactView && (desktopUpdate || updateStatus?.updateAvailable)
+  );
+  const canAutoUpdate = Boolean(window.syncboard?.downloadUpdate);
+  const updatePhase = desktopUpdate?.phase || 'idle';
+  const updateProgress = desktopUpdate?.progress ?? 0;
+
+  const startAutoUpdate = async () => {
+    if (!window.syncboard?.downloadUpdate) return;
+    setUpdateBusy(true);
+    try {
+      if (!desktopUpdate && window.syncboard.checkUpdate) {
+        await window.syncboard.checkUpdate();
+      }
+      const result = await window.syncboard.downloadUpdate();
+      if (result && result.ok === false) {
+        showToast(result.error || 'Falha ao atualizar');
+        setUpdateBusy(false);
+      }
+      // sucesso: o app reinicia via quitAndInstall
+    } catch (err) {
+      showToast((err as Error).message || 'Falha ao atualizar');
+      setUpdateBusy(false);
+    }
+  };
+
+  const openWhatsNew = async () => {
+    setShowWhatsNew(true);
+    let notes = desktopUpdate?.releaseNotes || updateStatus?.releaseNotes || '';
+    if (!notes && window.syncboard?.getUpdateNotes) {
+      const res = await window.syncboard.getUpdateNotes();
+      notes = res?.releaseNotes || '';
+      if (res?.releaseNotes && desktopUpdate) {
+        setDesktopUpdate({ ...desktopUpdate, releaseNotes: res.releaseNotes });
+      }
+    }
+    setWhatsNewNotes(notes.trim() || 'Nenhuma nota de versão disponível para este release.');
+  };
+
   const items = tab === 'pinned' ? pinned : history;
   const total = tab === 'pinned' ? pinnedTotal : historyTotal;
   const hasMore = items.length < total;
@@ -611,37 +683,89 @@ export default function App() {
         )}
       </header>
 
-      {(desktopUpdate || updateStatus?.updateAvailable) && !isCompactView && (
+      {showUpdateBanner && (
         <div className="update-banner">
-          <div>
-            <strong>Nova versão disponível</strong>
-            <span>
-              {desktopUpdate
-                ? `App ${desktopUpdate.version}`
-                : `Servidor ${updateStatus?.latest} (atual: ${updateStatus?.current})`}
-            </span>
-          </div>
-          <div className="update-actions">
-            {desktopUpdate ? (
-              <button
-                className="btn sm primary"
-                onClick={() => {
-                  if (desktopUpdate.downloaded) void window.syncboard?.installUpdate?.();
-                  else void window.syncboard?.downloadUpdate?.();
-                }}
-              >
-                {desktopUpdate.downloaded ? 'Instalar agora' : 'Baixar update'}
+          <div className="update-banner-main">
+            <div>
+              <strong>Nova versão disponível</strong>
+              <span>
+                {desktopUpdate
+                  ? `App ${desktopUpdate.version}`
+                  : `v${updateStatus?.latest} (atual: ${updateStatus?.current})`}
+              </span>
+            </div>
+            <div className="update-actions">
+              <button className="btn sm" type="button" onClick={() => void openWhatsNew()}>
+                O que há de novo
               </button>
-            ) : (
-              <a
-                className="btn sm primary"
-                href={updateStatus?.downloadPage || updateStatus?.assets?.macDmg || '#'}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Ver download
-              </a>
-            )}
+              {canAutoUpdate ? (
+                <button
+                  className="btn sm primary"
+                  type="button"
+                  disabled={updateBusy || updatePhase === 'installing'}
+                  onClick={() => void startAutoUpdate()}
+                >
+                  {updatePhase === 'downloading'
+                    ? `Baixando ${updateProgress}%`
+                    : updatePhase === 'installing'
+                      ? 'Instalando…'
+                      : desktopUpdate?.downloaded
+                        ? 'Instalar e reiniciar'
+                        : 'Baixar e instalar'}
+                </button>
+              ) : (
+                <a
+                  className="btn sm primary"
+                  href={updateStatus?.downloadPage || updateStatus?.assets?.macDmg || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Baixar
+                </a>
+              )}
+            </div>
+          </div>
+          {(updatePhase === 'downloading' || updatePhase === 'installing') && (
+            <div className="update-progress-block">
+              <div className="update-progress-label">
+                {updatePhase === 'downloading' ? 'Download' : 'Instalação'}
+                <span>{Math.round(updateProgress)}%</span>
+              </div>
+              <div className="update-progress-track" role="progressbar" aria-valuenow={updateProgress} aria-valuemin={0} aria-valuemax={100}>
+                <div
+                  className={`update-progress-fill${updatePhase === 'installing' ? ' installing' : ''}`}
+                  style={{ width: `${Math.max(4, Math.min(100, updateProgress))}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {desktopUpdate?.error && (
+            <p className="update-error">{desktopUpdate.error}</p>
+          )}
+        </div>
+      )}
+
+      {showWhatsNew && (
+        <div className="modal-overlay" onClick={() => setShowWhatsNew(false)}>
+          <div className="modal modal-form" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="whats-new-title">
+            <h3 id="whats-new-title">O que há de novo{updateVersion ? ` · v${updateVersion}` : ''}</h3>
+            <pre className="whats-new-body">{whatsNewNotes}</pre>
+            <div className="modal-footer">
+              <button className="btn" type="button" onClick={() => setShowWhatsNew(false)}>Fechar</button>
+              {canAutoUpdate && (
+                <button
+                  className="btn primary"
+                  type="button"
+                  disabled={updateBusy}
+                  onClick={() => {
+                    setShowWhatsNew(false);
+                    void startAutoUpdate();
+                  }}
+                >
+                  Baixar e instalar
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
