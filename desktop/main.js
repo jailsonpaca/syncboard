@@ -718,6 +718,11 @@ function connectWs() {
   ws.on('open', () => {
     connected = true;
     remoteFailStreak = 0;
+    try {
+      ws.send(JSON.stringify({ type: 'hello', deviceName: getConfig('deviceName') }));
+    } catch {
+      /* ok */
+    }
     updateTrayMenu();
   });
 

@@ -31,7 +31,7 @@ class SyncBoardApp : Application() {
         instance = this
         prefs = AppPrefs(this)
         api = ApiClient { prefs.getServerUrl() }
-        ws = WsClient(appScope, api.okHttp(), json)
+        ws = WsClient(appScope, api.okHttp(), json) { prefs.getDeviceName() }
         clipboardMonitor = ClipboardMonitor(this, prefs, api)
         mediaWatcher = MediaStoreWatcher(this, prefs, api, appScope)
     }

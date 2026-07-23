@@ -75,6 +75,16 @@ export function createRouter(store: ClipStore, hub: Hub, pair?: PairService): ex
     res.json(result);
   });
 
+  router.get('/devices', (_req, res) => {
+    const known = store.listDeviceNames();
+    const online = new Set(hub.onlineDeviceNames());
+    const names = new Set([...known, ...online]);
+    const devices = [...names]
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .map((name) => ({ name, online: online.has(name) }));
+    res.json({ devices });
+  });
+
   router.get('/items', (req, res) => {
     const pinned = req.query.pinned === 'true';
     const limit = Math.min(
@@ -84,6 +94,7 @@ export function createRouter(store: ClipStore, hub: Hub, pair?: PairService): ex
     const offset = Math.max(parseInt(String(req.query.offset || '0'), 10) || 0, 0);
     const query = typeof req.query.q === 'string' ? req.query.q : '';
     const filter = parseFilter(req.query.type);
+    const deviceName = typeof req.query.device === 'string' ? req.query.device : '';
     const flat = req.query.flat === 'true';
 
     const result = store.listPage({
@@ -92,6 +103,7 @@ export function createRouter(store: ClipStore, hub: Hub, pair?: PairService): ex
       offset,
       query,
       filter,
+      deviceName: deviceName || undefined,
     });
 
     // Compatibilidade: desktop/tray ainda esperam array puro

@@ -331,6 +331,36 @@ body {
   color: white;
 }
 
+.device-filter-row {
+  margin-top: 8px;
+}
+
+.filter-chip.device-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.filter-chip.device-chip.active {
+  background: color-mix(in srgb, var(--device-accent, var(--accent)) 28%, var(--surface));
+  border-color: var(--device-accent, var(--accent));
+  color: var(--text);
+}
+
+.device-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.device-dot.online {
+  background: var(--success, #3ecf8e);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success, #3ecf8e) 25%, transparent);
+}
+
 .pagination {
   display: flex;
   justify-content: center;
@@ -432,6 +462,15 @@ body {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+  gap: 8px;
+}
+
+.card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
 }
 
 .badge {
@@ -442,6 +481,21 @@ body {
   padding: 3px 8px;
   border-radius: 4px;
   color: var(--muted);
+}
+
+.device-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--device-accent, var(--accent));
+  background: color-mix(in srgb, var(--device-accent, var(--accent)) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--device-accent, var(--accent)) 45%, transparent);
 }
 
 .type-image .badge {
@@ -494,12 +548,6 @@ body {
   margin-left: auto;
   color: var(--muted);
   font-size: 0.8rem;
-}
-
-.device-tag {
-  font-size: 0.7rem;
-  color: var(--muted);
-  margin-top: 8px;
 }
 
 .card-actions {

@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.syncboard.android.SyncBoardApp
 import com.syncboard.android.data.ClipItem
+import com.syncboard.android.data.DeviceInfo
 import com.syncboard.android.data.ScreenshotSyncMode
 import com.syncboard.android.pair.UdpDiscovery
 import com.syncboard.android.sync.PendingScreenshot
@@ -27,6 +28,8 @@ data class UiState(
     val pairing: Boolean = false,
     val pairError: String? = null,
     val deviceName: String = "",
+    val devices: List<DeviceInfo> = emptyList(),
+    val deviceFilter: String = "",
     val clipboardSync: Boolean = true,
     val screenshotMode: ScreenshotSyncMode = ScreenshotSyncMode.ASK,
     val pendingScreenshot: PendingScreenshot? = null,
@@ -147,16 +150,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setDeviceFilter(device: String) {
+        _state.value = _state.value.copy(deviceFilter = device)
+        reload()
+    }
+
     fun reload() {
         viewModelScope.launch {
             val url = sb.prefs.getServerUrl() ?: return@launch
+            val device = _state.value.deviceFilter.ifBlank { null }
             _state.value = _state.value.copy(loading = true)
             try {
-                val h = sb.api.fetchItems(false)
-                val p = sb.api.fetchItems(true)
+                val h = sb.api.fetchItems(false, device = device)
+                val p = sb.api.fetchItems(true, device = device)
+                val devices = runCatching { sb.api.fetchDevices() }.getOrDefault(emptyList())
                 _state.value = _state.value.copy(
                     history = h.items,
                     pinned = p.items,
+                    devices = devices.ifEmpty {
+                        (h.items + p.items).mapNotNull { it.deviceName }.distinct()
+                            .map { DeviceInfo(it, online = false) }
+                    },
                     loading = false,
                     serverUrl = url,
                 )

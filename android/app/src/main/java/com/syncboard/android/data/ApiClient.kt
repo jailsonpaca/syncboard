@@ -40,11 +40,20 @@ class ApiClient(
         }
     }
 
-    suspend fun fetchItems(pinned: Boolean, limit: Int = 40, offset: Int = 0): ItemsPage =
+    suspend fun fetchItems(
+        pinned: Boolean,
+        limit: Int = 40,
+        offset: Int = 0,
+        device: String? = null,
+    ): ItemsPage =
         withContext(Dispatchers.IO) {
             val root = base()
+            val qs = buildString {
+                append("pinned=$pinned&limit=$limit&offset=$offset")
+                if (!device.isNullOrBlank()) append("&device=${java.net.URLEncoder.encode(device, "UTF-8")}")
+            }
             val req = Request.Builder()
-                .url("$root/api/items?pinned=$pinned&limit=$limit&offset=$offset")
+                .url("$root/api/items?$qs")
                 .get()
                 .build()
             client.newCall(req).execute().use { res ->
@@ -52,6 +61,15 @@ class ApiClient(
                 json.decodeFromString<ItemsPage>(res.body!!.string())
             }
         }
+
+    suspend fun fetchDevices(): List<DeviceInfo> = withContext(Dispatchers.IO) {
+        val root = base()
+        val req = Request.Builder().url("$root/api/devices").get().build()
+        client.newCall(req).execute().use { res ->
+            if (!res.isSuccessful) return@withContext emptyList()
+            json.decodeFromString<DevicesResponse>(res.body!!.string()).devices
+        }
+    }
 
     suspend fun createText(content: String, deviceName: String, pinned: Boolean = false, label: String? = null): ClipItem =
         withContext(Dispatchers.IO) {

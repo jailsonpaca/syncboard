@@ -51,13 +51,14 @@ function upsert(list: ClipItem[], item: ClipItem): ClipItem[] {
   return [item, ...list.filter((i) => i.id !== item.id)];
 }
 
-function matches(item: ClipItem, q: string, type: TypeFilter): boolean {
+function matches(item: ClipItem, q: string, type: TypeFilter, device?: string): boolean {
   if (type !== 'all') {
     if (type === 'text' && item.type !== 'text') return false;
     if (type === 'image' && item.type !== 'image') return false;
     if (type === 'video' && !(item.type === 'file' && item.mimeType?.startsWith('video/'))) return false;
     if (type === 'file' && !(item.type === 'file' && !item.mimeType?.startsWith('video/'))) return false;
   }
+  if (device?.trim() && (item.deviceName || '') !== device.trim()) return false;
   const query = q.trim().toLowerCase();
   if (!query) return true;
   const hay = [item.content, item.filename, item.label, item.deviceName]
@@ -113,12 +114,13 @@ export function getCachedPage(opts: {
   offset?: number;
   q?: string;
   type?: TypeFilter;
+  device?: string;
 }): ItemsPage {
   const data = load();
   const source = opts.pinned ? data.pinned : data.history;
   const type = opts.type || 'all';
   const q = opts.q || '';
-  const filtered = source.filter((i) => matches(i, q, type));
+  const filtered = source.filter((i) => matches(i, q, type, opts.device));
   if (opts.pinned) {
     filtered.sort((a, b) => {
       const la = (a.label || '').toLowerCase();

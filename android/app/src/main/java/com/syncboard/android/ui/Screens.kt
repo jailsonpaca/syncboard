@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
@@ -52,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +66,18 @@ import com.syncboard.android.data.ScreenshotSyncMode
 import com.syncboard.android.pair.UdpDiscovery
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private fun shortDevice(name: String): String {
+    val cleaned = name.removeSuffix(".local").trim()
+    return if (cleaned.length <= 22) cleaned else cleaned.take(20) + "…"
+}
+
+private fun deviceColor(name: String): Color {
+    var h = 0
+    for (ch in name) h = 31 * h + ch.code
+    val hue = ((h % 360) + 360) % 360
+    return Color.hsl(hue.toFloat(), 0.55f, 0.58f)
+}
 
 @Composable
 fun SyncBoardRoot(
@@ -277,6 +292,35 @@ private fun HomeScreen(vm: AppViewModel, state: UiState, snack: SnackbarHostStat
                 Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Histórico") })
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Fixo") })
             }
+            if (state.devices.isNotEmpty()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = state.deviceFilter.isBlank(),
+                        onClick = { vm.setDeviceFilter("") },
+                        label = { Text("Todos") },
+                    )
+                    state.devices.forEach { device ->
+                        FilterChip(
+                            selected = state.deviceFilter == device.name,
+                            onClick = { vm.setDeviceFilter(device.name) },
+                            label = {
+                                Text(
+                                    buildString {
+                                        if (device.online) append("● ")
+                                        append(shortDevice(device.name))
+                                    }
+                                )
+                            },
+                        )
+                    }
+                }
+            }
             val items = if (tab == 0) state.history else state.pinned
             if (state.loading && items.isEmpty()) {
                 Column(
@@ -293,7 +337,9 @@ private fun HomeScreen(vm: AppViewModel, state: UiState, snack: SnackbarHostStat
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        if (tab == 0) "Nada no histórico ainda." else "Nenhum item fixo.",
+                        if (state.deviceFilter.isNotBlank()) "Nenhum item deste dispositivo."
+                        else if (tab == 0) "Nada no histórico ainda."
+                        else "Nenhum item fixo.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -358,11 +404,17 @@ private fun ItemCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Spacer(Modifier.weight(1f))
-                Text(
-                    item.deviceName.orEmpty(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                val from = item.deviceName.orEmpty()
+                if (from.isNotBlank()) {
+                    Text(
+                        shortDevice(from),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = deviceColor(from),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Spacer(Modifier.height(8.dp))
             when (item.type) {

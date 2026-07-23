@@ -21,6 +21,7 @@ class WsClient(
         .pingInterval(20, TimeUnit.SECONDS)
         .build(),
     private val json: kotlinx.serialization.json.Json,
+    private val deviceNameProvider: suspend () -> String = { "Android" },
 ) {
     private var socket: WebSocket? = null
     private var reconnectJob: Job? = null
@@ -55,6 +56,16 @@ class WsClient(
         socket = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 _connected.tryEmit(true)
+                scope.launch {
+                    val name = runCatching { deviceNameProvider() }.getOrDefault("Android")
+                    val payload = json.encodeToString(
+                        kotlinx.serialization.json.buildJsonObject {
+                            put("type", kotlinx.serialization.json.JsonPrimitive("hello"))
+                            put("deviceName", kotlinx.serialization.json.JsonPrimitive(name))
+                        }
+                    )
+                    webSocket.send(payload)
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {

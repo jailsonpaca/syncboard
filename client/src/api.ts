@@ -62,6 +62,20 @@ export interface FetchItemsOpts {
   offset?: number;
   q?: string;
   type?: TypeFilter;
+  device?: string;
+}
+
+export type DeviceInfo = { name: string; online: boolean };
+
+export async function fetchDevices(): Promise<DeviceInfo[]> {
+  try {
+    const res = await fetch(`${apiBase()}/devices`);
+    if (!res.ok) throw new Error('devices');
+    const data = await res.json();
+    return Array.isArray(data.devices) ? data.devices : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchItemsPage(opts: FetchItemsOpts): Promise<ItemsPage> {
@@ -72,6 +86,7 @@ export async function fetchItemsPage(opts: FetchItemsOpts): Promise<ItemsPage> {
   });
   if (opts.q?.trim()) params.set('q', opts.q.trim());
   if (opts.type && opts.type !== 'all') params.set('type', opts.type);
+  if (opts.device?.trim()) params.set('device', opts.device.trim());
 
   try {
     const res = await fetch(`${apiBase()}/items?${params}`);
@@ -204,7 +219,14 @@ export function connectWebSocket(handlers: {
   function connect() {
     ws = new WebSocket(wsUrl());
 
-    ws.onopen = () => handlers.onConnectionChange(true);
+    ws.onopen = () => {
+      handlers.onConnectionChange(true);
+      try {
+        ws?.send(JSON.stringify({ type: 'hello', deviceName: getDeviceName() }));
+      } catch {
+        /* ok */
+      }
+    };
 
     ws.onclose = () => {
       handlers.onConnectionChange(false);

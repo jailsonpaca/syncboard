@@ -27,6 +27,17 @@ data class ItemsPage(
 )
 
 @Serializable
+data class DeviceInfo(
+    val name: String,
+    val online: Boolean = false,
+)
+
+@Serializable
+data class DevicesResponse(
+    val devices: List<DeviceInfo> = emptyList(),
+)
+
+@Serializable
 data class PairInfo(
     val code: String,
     val url: String,

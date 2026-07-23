@@ -18,12 +18,14 @@ import {
   itemDisplayKind,
   itemKindLabel,
   discoverLanServers,
+  fetchDevices,
   joinWithCodeWeb,
   regeneratePairCode,
   setDeviceName,
   setServerUrl,
   touchItem,
   updateItem,
+  type DeviceInfo,
   type DiscoveredServer,
   type PairInfo,
   type UpdateStatus,
@@ -59,11 +61,17 @@ function removeItem(list: ClipItem[], id: string): ClipItem[] {
   return list.filter((i) => i.id !== id);
 }
 
-function matchesFilter(item: ClipItem, filter: TypeFilter, query: string): boolean {
+function matchesFilter(
+  item: ClipItem,
+  filter: TypeFilter,
+  query: string,
+  device?: string
+): boolean {
   if (filter !== 'all') {
     const kind = itemDisplayKind(item);
     if (kind !== filter) return false;
   }
+  if (device?.trim() && (item.deviceName || '') !== device.trim()) return false;
   const q = query.trim().toLowerCase();
   if (!q) return true;
   const hay = [item.content, item.filename, item.label, item.deviceName]
@@ -71,6 +79,20 @@ function matchesFilter(item: ClipItem, filter: TypeFilter, query: string): boole
     .join(' ')
     .toLowerCase();
   return hay.includes(q);
+}
+
+/** Cor estável por nome de dispositivo (badge). */
+function deviceAccent(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  const hue = h % 360;
+  return `hsl(${hue} 55% 58%)`;
+}
+
+function shortDeviceLabel(name: string): string {
+  const cleaned = name.replace(/\.local$/i, '').trim();
+  if (cleaned.length <= 22) return cleaned;
+  return `${cleaned.slice(0, 20)}…`;
 }
 
 export default function App() {
@@ -85,6 +107,8 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [deviceFilter, setDeviceFilter] = useState<string>('');
+  const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [deviceName, setDeviceNameState] = useState(getDeviceName());
   const [serverInput, setServerInput] = useState(getServerUrl());
   const [showSettings, setShowSettings] = useState(false);
@@ -150,6 +174,7 @@ export default function App() {
           offset,
           q: debouncedSearch,
           type: typeFilter,
+          device: deviceFilter || undefined,
         });
 
         if (opts.pinnedTab) {
@@ -168,19 +193,20 @@ export default function App() {
         setLoadingMore(false);
       }
     },
-    [debouncedSearch, typeFilter, history.length, pinned.length, showToast]
+    [debouncedSearch, typeFilter, deviceFilter, history.length, pinned.length, showToast]
   );
 
   const reloadBoth = useCallback(async () => {
     setLoading(true);
     try {
-      const [h, p] = await Promise.all([
+      const [h, p, deviceList] = await Promise.all([
         fetchItemsPage({
           pinned: false,
           limit: PAGE_SIZE,
           offset: 0,
           q: debouncedSearch,
           type: typeFilter,
+          device: deviceFilter || undefined,
         }),
         fetchItemsPage({
           pinned: true,
@@ -188,12 +214,15 @@ export default function App() {
           offset: 0,
           q: debouncedSearch,
           type: typeFilter,
+          device: deviceFilter || undefined,
         }),
+        fetchDevices(),
       ]);
       setHistory(h.items);
       setHistoryTotal(h.total);
       setPinned(p.items);
       setPinnedTotal(p.total);
+      if (deviceList.length) setDevices(deviceList);
       setLocalMode(isUsingLocalFallback());
     } catch {
       showToast('Sem servidor — modo local (clipboard neste aparelho)');
@@ -202,7 +231,7 @@ export default function App() {
       setLocalMode(isUsingLocalFallback());
       setLoading(false);
     }
-  }, [debouncedSearch, typeFilter, showToast]);
+  }, [debouncedSearch, typeFilter, deviceFilter, showToast]);
 
   useEffect(() => {
     void reloadBoth();
@@ -306,16 +335,37 @@ export default function App() {
     const disconnect = connectWebSocket({
       onSync: (h, p) => {
         // Sync inicial: aplica filtros locais se houver busca/filtro ativo
-        const fh = h.filter((i) => matchesFilter(i, typeFilter, debouncedSearch));
-        const fp = p.filter((i) => matchesFilter(i, typeFilter, debouncedSearch));
+        const fh = h.filter((i) => matchesFilter(i, typeFilter, debouncedSearch, deviceFilter));
+        const fp = p.filter((i) => matchesFilter(i, typeFilter, debouncedSearch, deviceFilter));
         setHistory(fh.slice(0, PAGE_SIZE));
         setHistoryTotal(fh.length);
         setPinned(fp.slice(0, PAGE_SIZE));
         setPinnedTotal(fp.length);
+        const names = new Set<string>();
+        for (const i of [...h, ...p]) if (i.deviceName) names.add(i.deviceName);
+        if (names.size) {
+          setDevices((prev) => {
+            const online = new Set(prev.filter((d) => d.online).map((d) => d.name));
+            return [...names]
+              .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+              .map((name) => ({ name, online: online.has(name) }));
+          });
+        }
         setLoading(false);
+        void fetchDevices().then((list) => {
+          if (list.length) setDevices(list);
+        });
       },
       onCreated: (item) => {
-        if (!matchesFilter(item, typeFilter, debouncedSearch)) return;
+        if (item.deviceName) {
+          setDevices((prev) => {
+            if (prev.some((d) => d.name === item.deviceName)) return prev;
+            return [...prev, { name: item.deviceName!, online: false }].sort((a, b) =>
+              a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+            );
+          });
+        }
+        if (!matchesFilter(item, typeFilter, debouncedSearch, deviceFilter)) return;
         if (item.pinned) {
           setPinned((prev) => mergeItem(prev, item).slice(0, Math.max(prev.length, PAGE_SIZE)));
           setPinnedTotal((t) => t + 1);
@@ -327,7 +377,7 @@ export default function App() {
       onUpdated: (item) => {
         if (item.pinned) {
           setPinned((prev) => {
-            if (!matchesFilter(item, typeFilter, debouncedSearch)) {
+            if (!matchesFilter(item, typeFilter, debouncedSearch, deviceFilter)) {
               return removeItem(prev, item.id);
             }
             return mergeItem(prev, item);
@@ -335,7 +385,7 @@ export default function App() {
           setHistory((prev) => removeItem(prev, item.id));
         } else {
           setHistory((prev) => {
-            if (!matchesFilter(item, typeFilter, debouncedSearch)) {
+            if (!matchesFilter(item, typeFilter, debouncedSearch, deviceFilter)) {
               return removeItem(prev, item.id);
             }
             return mergeItem(prev, item);
@@ -351,13 +401,17 @@ export default function App() {
       },
       onConnectionChange: (ok) => {
         setConnected(ok);
-        if (ok) setLocalMode(isUsingLocalFallback());
-        else setLocalMode(true);
+        if (ok) {
+          setLocalMode(isUsingLocalFallback());
+          void fetchDevices().then((list) => {
+            if (list.length) setDevices(list);
+          });
+        } else setLocalMode(true);
       },
     });
     return disconnect;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers usam filtros atuais via closure intencional no sync
-  }, [debouncedSearch, typeFilter]);
+  }, [debouncedSearch, typeFilter, deviceFilter]);
 
   const applyItemUpdate = useCallback((updated: ClipItem) => {
     if (updated.pinned) {
@@ -743,13 +797,37 @@ export default function App() {
             </button>
           ))}
         </div>
+        {devices.length > 0 && (
+          <div className="filter-row device-filter-row" role="group" aria-label="Filtros por dispositivo">
+            <button
+              type="button"
+              className={`filter-chip${deviceFilter === '' ? ' active' : ''}`}
+              onClick={() => setDeviceFilter('')}
+            >
+              Todos dispositivos
+            </button>
+            {devices.map((d) => (
+              <button
+                key={d.name}
+                type="button"
+                className={`filter-chip device-chip${deviceFilter === d.name ? ' active' : ''}`}
+                style={{ ['--device-accent' as string]: deviceAccent(d.name) }}
+                onClick={() => setDeviceFilter(d.name)}
+                title={d.name}
+              >
+                <span className={`device-dot${d.online ? ' online' : ''}`} aria-hidden />
+                {shortDeviceLabel(d.name)}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <main className="items-grid">
         {loading && <div className="empty">Carregando...</div>}
         {!loading && items.length === 0 && (
           <div className="empty">
-            {debouncedSearch || typeFilter !== 'all'
+            {debouncedSearch || typeFilter !== 'all' || deviceFilter
               ? 'Nenhum item corresponde à busca/filtro.'
               : tab === 'pinned'
                 ? 'Nenhum item fixo. Fixe algo do histórico ou crie um novo.'
@@ -941,10 +1019,23 @@ function ItemCard({
 }) {
   const kind = itemDisplayKind(item);
 
+  const from = item.deviceName?.trim() || '';
+
   return (
     <article className={`card type-${kind}`} onClick={onSelect} onContextMenu={onContextMenu}>
       <div className="card-header">
-        <span className="badge">{itemKindLabel(item)}</span>
+        <div className="card-badges">
+          <span className="badge">{itemKindLabel(item)}</span>
+          {from && (
+            <span
+              className="device-badge"
+              style={{ ['--device-accent' as string]: deviceAccent(from) }}
+              title={`De ${from}`}
+            >
+              {shortDeviceLabel(from)}
+            </span>
+          )}
+        </div>
         <span className="time">{formatTime(item.updatedAt)}</span>
       </div>
 
@@ -965,8 +1056,6 @@ function ItemCard({
           <span className="file-size">{formatSize(item.size)}</span>
         </div>
       )}
-
-      {item.deviceName && <div className="device-tag">{item.deviceName}</div>}
 
       {!compact && (
         <div className="card-actions" onClick={(e) => e.stopPropagation()}>

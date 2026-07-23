@@ -19,6 +19,7 @@ export interface ListOptions {
   offset?: number;
   query?: string;
   filter?: ListFilter;
+  deviceName?: string;
 }
 
 export interface ListResult {
@@ -148,6 +149,12 @@ export class ClipStore {
       params.push(like, like, like, like);
     }
 
+    const deviceName = opts.deviceName?.trim();
+    if (deviceName) {
+      whereParts.push(`IFNULL(device_name, '') = ?`);
+      params.push(deviceName);
+    }
+
     const where = whereParts.join(' AND ');
     const order = pinnedOnly
       ? `ORDER BY label COLLATE NOCASE ASC, updated_at DESC`
@@ -256,6 +263,20 @@ export class ClipStore {
     if (fs.existsSync(blobPath)) {
       fs.unlinkSync(blobPath);
     }
+  }
+
+  /** Nomes de dispositivos que já enviaram itens. */
+  listDeviceNames(): string[] {
+    const rows = this.db
+      .prepare(
+        `
+      SELECT DISTINCT device_name AS name FROM items
+      WHERE device_name IS NOT NULL AND TRIM(device_name) != ''
+      ORDER BY device_name COLLATE NOCASE ASC
+    `
+      )
+      .all() as { name: string }[];
+    return rows.map((r) => r.name);
   }
 
   /** Remove itens de histórico além do limite; retorna IDs removidos. */
