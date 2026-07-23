@@ -11,7 +11,6 @@
   const versionLine = $('version-line');
   const footerVer = $('footer-ver');
   const githubLink = $('github-link');
-  const androidRoadmap = $('android-roadmap');
 
   githubLink.href = gh;
 
@@ -94,11 +93,7 @@
       bind(btnMac, macUrl, 'Mac em breve');
       bind(btnWindows, winUrl, 'Windows em breve');
       bind(btnLinux, linuxUrl, 'Linux em breve');
-      const androidOk = bind(btnAndroid, androidUrl, 'Android em breve');
-      if (androidOk) {
-        androidRoadmap.innerHTML =
-          '<span class="badge-roadmap">Disponível</span> APK nativo arm64 — pareie com o código do servidor.';
-      }
+      bind(btnAndroid, androidUrl, 'Android em breve');
     } catch (err) {
       console.warn(err);
       versionLine.textContent =
