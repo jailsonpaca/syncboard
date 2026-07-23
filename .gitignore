@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 /data/
+server/data/
 *.db
 *.db-shm
 *.db-wal
