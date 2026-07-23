@@ -3,9 +3,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VER="$(node -p "require('$ROOT/package.json').version")"
-TAG="${1:-v$VER}"
+PKG_VER="$(node -p "require('$ROOT/package.json').version")"
+TAG="${1:-v$PKG_VER}"
+# Preferência: versão do tag (ex.: v1.0.1 → 1.0.1), senão package.json
+VER="${TAG#v}"
 APK="$ROOT/desktop/release/SyncBoard-${VER}-arm64.apk"
+if [ ! -f "$APK" ] && [ "$VER" != "$PKG_VER" ]; then
+  APK="$ROOT/desktop/release/SyncBoard-${PKG_VER}-arm64.apk"
+fi
 CFG="$ROOT/release.config.json"
 OWNER="$(node -p "require('$CFG').owner")"
 REPO="$(node -p "require('$CFG').repo")"
