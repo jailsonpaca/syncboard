@@ -581,11 +581,11 @@ export default function App() {
             <input
               value={deviceName}
               onChange={(e) => setDeviceNameState(e.target.value)}
-              placeholder="MacBook, Linux-PC, Android..."
+              placeholder="MacBook, Windows-PC, Linux..."
             />
           </label>
           <button className="btn primary" onClick={saveSettings}>Salvar e reconectar</button>
-          <p className="hint">No Android, escaneie o QR ou use o código — depois adicione à tela inicial.</p>
+          <p className="hint">Pareie outros desktops com o código/QR. Android nativo está no roadmap (ainda indisponível).</p>
         </div>
       )}
 
