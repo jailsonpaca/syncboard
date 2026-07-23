@@ -1,0 +1,104 @@
+{
+  "name": "syncboard-desktop",
+  "version": "1.0.0",
+  "description": "SyncBoard — clipboard sync na rede local",
+  "main": "main.js",
+  "author": "SyncBoard",
+  "scripts": {
+    "icons": "node generate-icons.js",
+    "start": "node generate-icons.js && electron . --no-sandbox",
+    "postinstall": "node generate-icons.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.9",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.syncboard.app",
+    "productName": "SyncBoard",
+    "directories": {
+      "output": "release",
+      "buildResources": "icons"
+    },
+    "files": [
+      "**/*",
+      "!release/**",
+      "!resources/**"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/server",
+        "to": "server",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/client",
+        "to": "client",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "icons",
+        "to": "icons",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../release.config.json",
+        "to": "release.config.json"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "jailsonpaca",
+        "repo": "syncboard"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "icons/icon.png",
+      "identity": null,
+      "gatekeeperAssess": false,
+      "hardenedRuntime": false
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz",
+        "deb"
+      ],
+      "category": "Utility",
+      "icon": "icons/icon.png",
+      "executableName": "syncboard",
+      "artifactName": "SyncBoard-${version}-${arch}.${ext}",
+      "desktop": {
+        "Name": "SyncBoard",
+        "Comment": "Clipboard sync na rede local",
+        "Categories": "Utility;Network;"
+      }
+    },
+    "dmg": {
+      "title": "SyncBoard"
+    },
+    "appImage": {
+      "artifactName": "SyncBoard-${version}-${arch}.AppImage"
+    }
+  }
+}

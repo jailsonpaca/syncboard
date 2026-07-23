@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Preferências</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #0f0f12;
+      color: #e8e8ed;
+      padding: 20px;
+    }
+    h1 { font-size: 1.1rem; margin-bottom: 16px; }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 14px;
+      font-size: 0.85rem;
+      color: #8888a0;
+    }
+    input[type="text"], input[type="number"] {
+      background: #1a1a21;
+      border: 1px solid #2e2e3a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #e8e8ed;
+      font-size: 0.95rem;
+    }
+    .hotkey-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .hotkey-row input { flex: 1; }
+    .hotkey-row button {
+      flex: 0 0 auto;
+      padding: 10px 14px;
+      background: #24242e;
+      color: #e8e8ed;
+      border: 1px solid #2e2e3a;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .hotkey-row button.recording {
+      background: #6c5ce7;
+      border-color: #6c5ce7;
+      color: white;
+    }
+    .checkbox {
+      flex-direction: row;
+      align-items: center;
+      gap: 10px;
+      color: #e8e8ed;
+    }
+    .checkbox input { width: 18px; height: 18px; }
+    .hint {
+      font-size: 0.78rem;
+      color: #666;
+      margin-top: -8px;
+      margin-bottom: 14px;
+      line-height: 1.4;
+    }
+    .actions { display: flex; gap: 10px; margin-top: 8px; }
+    button {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .primary { background: #6c5ce7; color: white; }
+    .secondary { background: #24242e; color: #e8e8ed; }
+    .network {
+      background: #1a1a21;
+      border: 1px solid #2e2e3a;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 14px;
+      font-size: 0.85rem;
+    }
+    .network strong { color: #00cec9; }
+  </style>
+</head>
+<body>
+  <h1>Preferências SyncBoard</h1>
+  <div class="network" id="network-info"></div>
+
+  <label class="checkbox">
+    <input type="checkbox" id="runLocalServer" />
+    Rodar servidor neste computador
+  </label>
+  <p class="hint">Ative no Mac/Linux que ficará sempre ligado na rede. Outros dispositivos conectam ao IP dele.</p>
+
+  <label>
+    Porta do servidor
+    <input type="number" id="port" min="1024" max="65535" value="8787" />
+  </label>
+
+  <label>
+    Código do servidor (pareamento LAN)
+    <div class="hotkey-row">
+      <input type="text" id="pairCode" placeholder="Ex: A3K9P2" maxlength="8" style="text-transform:uppercase;letter-spacing:0.12em;font-weight:600" />
+      <button type="button" id="joinCode">Parear</button>
+    </div>
+  </label>
+  <p class="hint">Na mesma Wi‑Fi do servidor: digite o código de 6 caracteres (ou cole o QR). Não precisa do IP.</p>
+
+  <label>
+    URL do servidor (clientes remotos)
+    <input type="text" id="serverUrl" placeholder="http://192.168.1.10:8787" />
+  </label>
+  <p class="hint">Desative "servidor local" e coloque o IP da máquina que roda o servidor — ou use o código acima.</p>
+
+  <label>
+    Nome deste dispositivo
+    <input type="text" id="deviceName" />
+  </label>
+
+  <label class="checkbox">
+    <input type="checkbox" id="autoSync" />
+    Sync automático do clipboard
+  </label>
+
+  <label class="checkbox">
+    <input type="checkbox" id="autoUpdate" />
+    Buscar atualizações automaticamente
+  </label>
+  <p class="hint" id="version-hint">O app avisa no menu quando houver nova versão.</p>
+
+  <label class="checkbox">
+    <input type="checkbox" id="launchAtLogin" />
+    Iniciar com o sistema
+  </label>
+  <p class="hint">Abre o SyncBoard automaticamente ao ligar o Mac ou Linux (ícone na barra/bandeja).</p>
+
+  <label>
+    Atalho de teclado (popup compacto)
+    <div class="hotkey-row">
+      <input type="text" id="hotkey" readonly placeholder="Alt+V" />
+      <button type="button" id="recordHotkey">Gravar</button>
+    </div>
+  </label>
+  <p class="hint">Clique em Gravar e pressione a combinação (ex.: Alt+V / ⌥V). Usa a tecla física — Option no Mac não gera √/®.</p>
+
+  <div class="actions">
+    <button class="secondary" id="cancel">Cancelar</button>
+    <button class="primary" id="save">Salvar</button>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let recording = false;
+
+    async function load() {
+      const cfg = await window.syncboard.getConfig();
+      $('runLocalServer').checked = cfg.runLocalServer;
+      $('port').value = cfg.port;
+      $('serverUrl').value = cfg.serverUrl;
+      $('deviceName').value = cfg.deviceName;
+      $('autoSync').checked = cfg.autoSync;
+      $('autoUpdate').checked = cfg.autoUpdate !== false;
+      $('launchAtLogin').checked = cfg.launchAtLogin;
+      $('hotkey').value = cfg.hotkey || '';
+      $('hotkey').placeholder = cfg.hotkeyDisplay || '⌥V';
+      $('version-hint').textContent = `Versão ${cfg.appVersion || ''} — o app avisa no menu quando houver update.`;
+
+      if (cfg.runLocalServer) {
+        $('network-info').innerHTML = `Android/outros: <strong>http://${cfg.localIp}:${cfg.port}</strong> · abra as configs da janela para ver o QR/código`;
+      } else {
+        $('network-info').innerHTML = `Conectado a: <strong>${cfg.serverUrl}</strong>`;
+      }
+
+      $('runLocalServer').addEventListener('change', () => {
+        const local = $('runLocalServer').checked;
+        $('serverUrl').disabled = local;
+        $('port').disabled = !local;
+      });
+      $('serverUrl').disabled = cfg.runLocalServer;
+      $('port').disabled = !cfg.runLocalServer;
+    }
+
+    $('recordHotkey').addEventListener('click', () => {
+      recording = !recording;
+      $('recordHotkey').textContent = recording ? 'Pressione…' : 'Gravar';
+      $('recordHotkey').classList.toggle('recording', recording);
+    });
+
+    function keyFromEvent(e) {
+      const ignore = ['Control', 'Shift', 'Alt', 'Meta', 'Command', 'AltGraph', 'OS'];
+      if (ignore.includes(e.key)) return null;
+
+      // Tecla física: evita √/®/etc. quando Option/Alt está pressionado
+      const code = e.code || '';
+      const keyMatch = /^Key([A-Z])$/.exec(code);
+      if (keyMatch) return keyMatch[1];
+      const digitMatch = /^Digit([0-9])$/.exec(code);
+      if (digitMatch) return digitMatch[1];
+      const fMatch = /^F([0-9]{1,2})$/.exec(code);
+      if (fMatch) return 'F' + fMatch[1];
+
+      if (e.key === ' ' || code === 'Space') return 'Space';
+      if (e.key === 'Dead') return null;
+      if (e.key.startsWith('Arrow')) return e.key.replace('Arrow', '');
+      if (e.key.length === 1) {
+        if (/^[a-zA-Z0-9]$/.test(e.key)) return e.key.toUpperCase();
+        if (e.altKey) return null;
+        return e.key.toUpperCase();
+      }
+      return e.key;
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (!recording) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const parts = [];
+      if (e.metaKey || e.ctrlKey) parts.push('CommandOrControl');
+      if (e.altKey) parts.push('Alt');
+      if (e.shiftKey) parts.push('Shift');
+
+      const key = keyFromEvent(e);
+      if (!key) return;
+
+      parts.push(key);
+      $('hotkey').value = parts.join('+');
+      recording = false;
+      $('recordHotkey').textContent = 'Gravar';
+      $('recordHotkey').classList.remove('recording');
+    });
+
+    $('joinCode').addEventListener('click', async () => {
+      const code = $('pairCode').value.trim();
+      if (!code) {
+        alert('Informe o código do servidor');
+        return;
+      }
+      $('joinCode').disabled = true;
+      $('joinCode').textContent = '…';
+      try {
+        const result = await window.syncboard.joinWithCode(code);
+        if (!result?.ok) {
+          alert(result?.error || 'Falha ao parear');
+          return;
+        }
+        $('serverUrl').value = result.serverUrl;
+        $('runLocalServer').checked = false;
+        $('serverUrl').disabled = false;
+        $('port').disabled = true;
+        $('network-info').innerHTML = `Conectado a: <strong>${result.serverUrl}</strong>`;
+        alert(`Pareado com ${result.serverUrl}`);
+      } finally {
+        $('joinCode').disabled = false;
+        $('joinCode').textContent = 'Parear';
+      }
+    });
+
+    $('save').addEventListener('click', async () => {
+      const hotkey = $('hotkey').value.trim();
+      if (hotkey) {
+        const test = await window.syncboard.testHotkey(hotkey);
+        if (!test.ok) {
+          alert(test.error || 'Atalho inválido ou em uso');
+          return;
+        }
+        $('hotkey').value = test.hotkey;
+      }
+
+      await window.syncboard.saveConfig({
+        runLocalServer: $('runLocalServer').checked,
+        port: parseInt($('port').value, 10) || 8787,
+        serverUrl: $('serverUrl').value.trim(),
+        deviceName: $('deviceName').value.trim(),
+        autoSync: $('autoSync').checked,
+        autoUpdate: $('autoUpdate').checked,
+        launchAtLogin: $('launchAtLogin').checked,
+        hotkey: $('hotkey').value.trim() || undefined,
+      });
+      window.close();
+    });
+
+    $('cancel').addEventListener('click', () => window.close());
+    load();
+  </script>
+</body>
+</html>

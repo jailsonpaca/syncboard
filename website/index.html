@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SyncBoard — clipboard na sua rede</title>
+  <meta name="description" content="Sincronize texto, imagens e arquivos entre Mac, Linux e Android na mesma Wi‑Fi." />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+
+  <header class="top">
+    <a class="brand-mark" href="#">SyncBoard</a>
+    <nav>
+      <a href="#download">Baixar</a>
+      <a href="#como">Como funciona</a>
+      <a id="github-link" href="#" target="_blank" rel="noreferrer">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" id="download">
+      <h1 class="logo-hero">SyncBoard</h1>
+      <p class="tagline">Clipboard compartilhado na sua Wi‑Fi — Mac, Linux e Android, sem nuvem.</p>
+      <div class="cta-row">
+        <a class="btn primary" id="btn-mac" href="#">Baixar para Mac</a>
+        <a class="btn" id="btn-linux" href="#">Baixar para Linux</a>
+      </div>
+      <p class="meta" id="version-line">Carregando última versão…</p>
+      <p class="android-note">Android: depois de subir o servidor, abra o IP no Chrome e adicione à tela inicial.</p>
+    </section>
+
+    <section class="section" id="como">
+      <h2>Três passos</h2>
+      <ol class="steps">
+        <li>
+          <strong>Baixe</strong> o app na máquina que fica na rede (servidor).
+        </li>
+        <li>
+          <strong>Ative</strong> “Servidor local” e mostre o código/QR nas configurações.
+        </li>
+        <li>
+          <strong>Pareie</strong> Mac, Linux ou Android com o código — sem digitar IP.
+        </li>
+      </ol>
+    </section>
+
+    <section class="section muted">
+      <h2>Atualizações</h2>
+      <p>
+        O app avisa quando há nova versão. Você confirma e atualiza em um toque —
+        cliente e servidor embutido sobem juntos.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <span>SyncBoard</span>
+    <span id="footer-ver"></span>
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

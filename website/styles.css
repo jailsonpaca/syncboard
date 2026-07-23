@@ -1,0 +1,200 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,500;0,9..40,700;1,9..40,500&family=Syne:wght@700;800&display=swap');
+
+:root {
+  --bg0: #0c0d12;
+  --bg1: #151822;
+  --text: #eef0f7;
+  --muted: #8b92a8;
+  --accent: #3ecfbe;
+  --accent2: #5b7cfa;
+  --line: rgba(255, 255, 255, 0.08);
+  --radius: 14px;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { min-height: 100%; }
+
+body {
+  color: var(--text);
+  background: var(--bg0);
+  line-height: 1.5;
+}
+
+.atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(900px 500px at 15% -10%, rgba(59, 124, 250, 0.28), transparent 55%),
+    radial-gradient(700px 420px at 90% 10%, rgba(62, 207, 190, 0.22), transparent 50%),
+    linear-gradient(180deg, #10131c 0%, var(--bg0) 55%);
+}
+
+.top {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand-mark {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: var(--text);
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+
+nav {
+  display: flex;
+  gap: 18px;
+}
+
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+
+nav a:hover { color: var(--text); }
+
+.hero {
+  min-height: calc(100dvh - 80px);
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 8vh 24px 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+}
+
+.logo-hero {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: clamp(3.2rem, 10vw, 5.6rem);
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+  background: linear-gradient(120deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: rise 0.8s ease both;
+}
+
+.tagline {
+  max-width: 34rem;
+  font-size: clamp(1.05rem, 2.4vw, 1.3rem);
+  color: var(--muted);
+  animation: rise 0.9s 0.08s ease both;
+}
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  animation: rise 1s 0.14s ease both;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.btn.primary {
+  background: linear-gradient(120deg, var(--accent), #2bb8a8);
+  color: #041512;
+  border: none;
+}
+
+.btn[disabled], .btn.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.meta, .android-note {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.section {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 64px 24px;
+  border-top: 1px solid var(--line);
+}
+
+.section h2 {
+  font-family: 'Syne', sans-serif;
+  font-size: 1.6rem;
+  margin-bottom: 18px;
+  letter-spacing: -0.02em;
+}
+
+.section.muted p {
+  color: var(--muted);
+  max-width: 40rem;
+}
+
+.steps {
+  list-style: none;
+  display: grid;
+  gap: 16px;
+}
+
+.steps li {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(21, 24, 34, 0.65);
+  color: var(--muted);
+}
+
+.steps strong {
+  display: block;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+footer {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 640px) {
+  nav a:first-child { display: none; }
+  .cta-row { flex-direction: column; }
+  .btn { width: 100%; }
+}

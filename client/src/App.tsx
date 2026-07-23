@@ -1,0 +1,866 @@
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import type { ClipItem, TypeFilter } from './types';
+import {
+  blobUrl,
+  connectWebSocket,
+  copyItemToClipboard,
+  createText,
+  deleteItem,
+  fetchItemsPage,
+  fetchPairInfo,
+  fetchUpdateStatus,
+  formatSize,
+  formatTime,
+  getDeviceName,
+  getServerUrl,
+  isUsingLocalFallback,
+  itemDisplayKind,
+  itemKindLabel,
+  joinWithCodeWeb,
+  regeneratePairCode,
+  setDeviceName,
+  setServerUrl,
+  touchItem,
+  updateItem,
+  type PairInfo,
+  type UpdateStatus,
+} from './api';
+
+type Tab = 'history' | 'pinned';
+
+type ContextMenuState = {
+  item: ClipItem;
+  x: number;
+  y: number;
+};
+
+const PAGE_SIZE = 20;
+const isCompactView = new URLSearchParams(window.location.search).get('view') === 'compact';
+const CONTEXT_MENU_WIDTH = 168;
+const CONTEXT_MENU_HEIGHT = 132;
+
+const FILTERS: { id: TypeFilter; label: string }[] = [
+  { id: 'all', label: 'Todos' },
+  { id: 'text', label: 'Texto' },
+  { id: 'image', label: 'Imagem' },
+  { id: 'video', label: 'Vídeo' },
+  { id: 'file', label: 'Arquivo' },
+];
+
+function mergeItem(list: ClipItem[], item: ClipItem): ClipItem[] {
+  const filtered = list.filter((i) => i.id !== item.id);
+  return [item, ...filtered];
+}
+
+function removeItem(list: ClipItem[], id: string): ClipItem[] {
+  return list.filter((i) => i.id !== id);
+}
+
+function matchesFilter(item: ClipItem, filter: TypeFilter, query: string): boolean {
+  if (filter !== 'all') {
+    const kind = itemDisplayKind(item);
+    if (kind !== filter) return false;
+  }
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const hay = [item.content, item.filename, item.label, item.deviceName]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return hay.includes(q);
+}
+
+export default function App() {
+  const [tab, setTab] = useState<Tab>('history');
+  const [history, setHistory] = useState<ClipItem[]>([]);
+  const [pinned, setPinned] = useState<ClipItem[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [pinnedTotal, setPinnedTotal] = useState(0);
+  const [connected, setConnected] = useState(false);
+  const [localMode, setLocalMode] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [deviceName, setDeviceNameState] = useState(getDeviceName());
+  const [serverInput, setServerInput] = useState(getServerUrl());
+  const [showSettings, setShowSettings] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pinModal, setPinModal] = useState<{ item: ClipItem } | null>(null);
+  const [pinModalLabel, setPinModalLabel] = useState('');
+  const [createFixedModal, setCreateFixedModal] = useState(false);
+  const [createFixedLabel, setCreateFixedLabel] = useState('');
+  const [createFixedContent, setCreateFixedContent] = useState('');
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [pairInfo, setPairInfo] = useState<PairInfo | null>(null);
+  const [joinCode, setJoinCode] = useState('');
+  const [joining, setJoining] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [desktopUpdate, setDesktopUpdate] = useState<{
+    version: string;
+    downloaded: boolean;
+  } | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  }, []);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeContextMenu();
+    };
+    const onClose = () => closeContextMenu();
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onClose);
+    window.addEventListener('scroll', onClose, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onClose);
+      window.removeEventListener('scroll', onClose, true);
+    };
+  }, [contextMenu, closeContextMenu]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 200);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const loadPage = useCallback(
+    async (opts: { reset: boolean; pinnedTab: boolean }) => {
+      const offset = opts.reset ? 0 : opts.pinnedTab ? pinned.length : history.length;
+      if (opts.reset) setLoading(true);
+      else setLoadingMore(true);
+
+      try {
+        const page = await fetchItemsPage({
+          pinned: opts.pinnedTab,
+          limit: PAGE_SIZE,
+          offset,
+          q: debouncedSearch,
+          type: typeFilter,
+        });
+
+        if (opts.pinnedTab) {
+          setPinned((prev) => (opts.reset ? page.items : [...prev, ...page.items]));
+          setPinnedTotal(page.total);
+        } else {
+          setHistory((prev) => (opts.reset ? page.items : [...prev, ...page.items]));
+          setHistoryTotal(page.total);
+        }
+      } catch {
+        showToast('Sem servidor — usando dados locais');
+        setLocalMode(true);
+      } finally {
+        setLocalMode(isUsingLocalFallback());
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [debouncedSearch, typeFilter, history.length, pinned.length, showToast]
+  );
+
+  const reloadBoth = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [h, p] = await Promise.all([
+        fetchItemsPage({
+          pinned: false,
+          limit: PAGE_SIZE,
+          offset: 0,
+          q: debouncedSearch,
+          type: typeFilter,
+        }),
+        fetchItemsPage({
+          pinned: true,
+          limit: PAGE_SIZE,
+          offset: 0,
+          q: debouncedSearch,
+          type: typeFilter,
+        }),
+      ]);
+      setHistory(h.items);
+      setHistoryTotal(h.total);
+      setPinned(p.items);
+      setPinnedTotal(p.total);
+      setLocalMode(isUsingLocalFallback());
+    } catch {
+      showToast('Sem servidor — modo local (clipboard neste aparelho)');
+      setLocalMode(true);
+    } finally {
+      setLocalMode(isUsingLocalFallback());
+      setLoading(false);
+    }
+  }, [debouncedSearch, typeFilter, showToast]);
+
+  useEffect(() => {
+    void reloadBoth();
+  }, [reloadBoth]);
+
+  useEffect(() => {
+    // Deep link ?join=CODE
+    const params = new URLSearchParams(window.location.search);
+    const join = params.get('join');
+    if (join) setJoinCode(join.toUpperCase());
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const info = await fetchPairInfo();
+        setPairInfo(info);
+      } catch {
+        setPairInfo(null);
+      }
+      try {
+        const st = await fetchUpdateStatus(false);
+        setUpdateStatus(st);
+      } catch {
+        /* ok */
+      }
+    })();
+  }, [connected]);
+
+  useEffect(() => {
+    if (!window.syncboard?.onUpdateStatus) return;
+    return window.syncboard.onUpdateStatus((data) => {
+      if (data.updateAvailable && data.version) {
+        setDesktopUpdate({
+          version: data.version,
+          downloaded: Boolean(data.downloaded),
+        });
+      } else {
+        setDesktopUpdate(null);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const disconnect = connectWebSocket({
+      onSync: (h, p) => {
+        // Sync inicial: aplica filtros locais se houver busca/filtro ativo
+        const fh = h.filter((i) => matchesFilter(i, typeFilter, debouncedSearch));
+        const fp = p.filter((i) => matchesFilter(i, typeFilter, debouncedSearch));
+        setHistory(fh.slice(0, PAGE_SIZE));
+        setHistoryTotal(fh.length);
+        setPinned(fp.slice(0, PAGE_SIZE));
+        setPinnedTotal(fp.length);
+        setLoading(false);
+      },
+      onCreated: (item) => {
+        if (!matchesFilter(item, typeFilter, debouncedSearch)) return;
+        if (item.pinned) {
+          setPinned((prev) => mergeItem(prev, item).slice(0, Math.max(prev.length, PAGE_SIZE)));
+          setPinnedTotal((t) => t + 1);
+        } else {
+          setHistory((prev) => mergeItem(prev, item).slice(0, Math.max(prev.length, PAGE_SIZE)));
+          setHistoryTotal((t) => Math.min(t + 1, 100));
+        }
+      },
+      onUpdated: (item) => {
+        if (item.pinned) {
+          setPinned((prev) => {
+            if (!matchesFilter(item, typeFilter, debouncedSearch)) {
+              return removeItem(prev, item.id);
+            }
+            return mergeItem(prev, item);
+          });
+          setHistory((prev) => removeItem(prev, item.id));
+        } else {
+          setHistory((prev) => {
+            if (!matchesFilter(item, typeFilter, debouncedSearch)) {
+              return removeItem(prev, item.id);
+            }
+            return mergeItem(prev, item);
+          });
+          setPinned((prev) => removeItem(prev, item.id));
+        }
+      },
+      onDeleted: (id) => {
+        setHistory((prev) => removeItem(prev, id));
+        setPinned((prev) => removeItem(prev, id));
+        setHistoryTotal((t) => Math.max(0, t - 1));
+        setPinnedTotal((t) => Math.max(0, t - 1));
+      },
+      onConnectionChange: (ok) => {
+        setConnected(ok);
+        if (ok) setLocalMode(isUsingLocalFallback());
+        else setLocalMode(true);
+      },
+    });
+    return disconnect;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers usam filtros atuais via closure intencional no sync
+  }, [debouncedSearch, typeFilter]);
+
+  const applyItemUpdate = useCallback((updated: ClipItem) => {
+    if (updated.pinned) {
+      setPinned((prev) => mergeItem(prev, updated));
+      setHistory((prev) => removeItem(prev, updated.id));
+    } else {
+      setHistory((prev) => mergeItem(prev, updated));
+      setPinned((prev) => removeItem(prev, updated.id));
+    }
+  }, []);
+
+  const bumpAndCopy = useCallback(
+    async (item: ClipItem) => {
+      let target = item;
+
+      // Clique no nome-texto do WhatsApp → usa o item Arquivo correspondente
+      if (item.type === 'text' && item.content) {
+        const match = [...history, ...pinned].find(
+          (i) =>
+            i.type === 'file' &&
+            (i.filename === item.content || i.filename === `${item.content}.mp4`)
+        );
+        if (match) target = match;
+      }
+
+      try {
+        // App Electron: o main process faz bump + clipboard + paste
+        if (window.syncboard?.pasteItem) {
+          const result = await window.syncboard.pasteItem(target);
+          if (result?.pasted) return;
+          if (target.type === 'file') {
+            showToast('Salvo em Downloads/SyncBoard (pasta aberta)');
+            return;
+          }
+          showToast(result?.ok ? 'Copiado — cole com Ctrl/Cmd+V' : 'Não foi possível colar');
+          return;
+        }
+
+        // Web/Android: bump no histórico + clipboard
+        if (!target.pinned) {
+          const bumped = await touchItem(target.id);
+          applyItemUpdate(bumped);
+          target = bumped;
+        }
+
+        await copyItemToClipboard(target);
+        showToast('Copiado para a área de transferência');
+      } catch {
+        showToast('Não foi possível copiar — tente baixar');
+      }
+    },
+    [history, pinned, applyItemUpdate, showToast]
+  );
+
+  const handleCopy = async (item: ClipItem) => {
+    await bumpAndCopy(item);
+  };
+
+  const handleSelectItem = (item: ClipItem) => {
+    // Clique: move para o topo + cola no clipboard (popup cola no app focado)
+    void bumpAndCopy(item);
+  };
+
+  const openPinModal = (item: ClipItem) => {
+    setPinModalLabel(item.label || '');
+    setPinModal({ item });
+  };
+
+  const confirmPin = async () => {
+    if (!pinModal) return;
+    try {
+      const updated = await updateItem(pinModal.item.id, {
+        pinned: true,
+        label: pinModalLabel.trim() || undefined,
+      });
+      applyItemUpdate(updated);
+      setTab('pinned');
+      setPinModal(null);
+      showToast('Fixado em Fixo');
+    } catch {
+      showToast('Erro ao fixar');
+    }
+  };
+
+  const handleCreatePin = async () => {
+    const label = createFixedLabel.trim();
+    const content = createFixedContent.trim();
+    if (!label || !content) return;
+    try {
+      const created = await createText(content, { pinned: true, label });
+      setPinned((prev) => mergeItem(prev, created));
+      setPinnedTotal((t) => t + 1);
+      setCreateFixedLabel('');
+      setCreateFixedContent('');
+      setCreateFixedModal(false);
+      setTab('pinned');
+      showToast('Item fixo criado');
+    } catch {
+      showToast('Erro ao criar');
+    }
+  };
+
+  const handleUnpin = async (item: ClipItem) => {
+    try {
+      const updated = await updateItem(item.id, { pinned: false });
+      applyItemUpdate(updated);
+      showToast('Removido de Fixo');
+    } catch {
+      showToast('Erro');
+    }
+  };
+
+  const handleDelete = async (item: ClipItem, opts?: { skipConfirm?: boolean }) => {
+    // No popup do atalho, confirm() nativo tira o foco e a janela some
+    const skip = opts?.skipConfirm || isCompactView;
+    if (!skip && !confirm('Excluir este item?')) return;
+    try {
+      await deleteItem(item.id);
+      showToast('Excluído');
+    } catch {
+      showToast('Erro ao excluir');
+    }
+  };
+
+  const openItemContextMenu = (item: ClipItem, e: ReactMouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const x = Math.max(8, Math.min(e.clientX, window.innerWidth - CONTEXT_MENU_WIDTH - 8));
+    const y = Math.max(8, Math.min(e.clientY, window.innerHeight - CONTEXT_MENU_HEIGHT - 8));
+    setContextMenu({ item, x, y });
+  };
+
+  const saveSettings = () => {
+    setServerUrl(serverInput.trim());
+    setDeviceName(deviceName.trim() || getDeviceName());
+    setDeviceNameState(getDeviceName());
+    setShowSettings(false);
+    window.location.reload();
+  };
+
+  const handleJoinCode = async () => {
+    if (!joinCode.trim()) return;
+    setJoining(true);
+    try {
+      const { serverUrl } = await joinWithCodeWeb(joinCode.trim());
+      setServerInput(serverUrl);
+      showToast(`Conectado a ${serverUrl}`);
+      setTimeout(() => window.location.reload(), 400);
+    } catch (err) {
+      showToast((err as Error).message || 'Falha ao parear');
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const handleRegeneratePair = async () => {
+    try {
+      const info = await regeneratePairCode();
+      setPairInfo(info);
+      showToast('Novo código gerado');
+    } catch {
+      showToast('Erro ao regenerar');
+    }
+  };
+
+  const items = tab === 'pinned' ? pinned : history;
+  const total = tab === 'pinned' ? pinnedTotal : historyTotal;
+  const hasMore = items.length < total;
+
+  const countLabel = useMemo(() => {
+    if (debouncedSearch || typeFilter !== 'all') {
+      return `${total}`;
+    }
+    return `${total}`;
+  }, [debouncedSearch, typeFilter, total]);
+
+  return (
+    <div className={`app${isCompactView ? ' compact' : ''}`}>
+      <header className="header">
+        <div className="header-left">
+          <div className="logo">SyncBoard</div>
+          <span
+            className={`status ${connected && !localMode ? 'online' : 'offline'}`}
+            title={
+              connected && !localMode
+                ? 'Conectado ao servidor'
+                : 'Modo local — clipboard neste aparelho (histórico e Fixo em cache)'
+            }
+          >
+            {connected && !localMode ? '●' : '○ local'}
+          </span>
+        </div>
+        {!isCompactView && (
+          <button className="icon-btn" onClick={() => setShowSettings(!showSettings)} title="Configurações">
+            ⚙
+          </button>
+        )}
+      </header>
+
+      {(desktopUpdate || updateStatus?.updateAvailable) && !isCompactView && (
+        <div className="update-banner">
+          <div>
+            <strong>Nova versão disponível</strong>
+            <span>
+              {desktopUpdate
+                ? `App ${desktopUpdate.version}`
+                : `Servidor ${updateStatus?.latest} (atual: ${updateStatus?.current})`}
+            </span>
+          </div>
+          <div className="update-actions">
+            {desktopUpdate ? (
+              <button
+                className="btn sm primary"
+                onClick={() => {
+                  if (desktopUpdate.downloaded) void window.syncboard?.installUpdate?.();
+                  else void window.syncboard?.downloadUpdate?.();
+                }}
+              >
+                {desktopUpdate.downloaded ? 'Instalar agora' : 'Baixar update'}
+              </button>
+            ) : (
+              <a
+                className="btn sm primary"
+                href={updateStatus?.downloadPage || updateStatus?.assets?.macDmg || '#'}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Ver download
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <div className="settings-panel">
+          {pairInfo && (
+            <div className="pair-panel">
+              <div className="pair-title">Conectar dispositivos</div>
+              <p className="hint">Na mesma Wi‑Fi: escaneie o QR ou digite o código no outro aparelho.</p>
+              <div className="pair-code">{pairInfo.code}</div>
+              <img
+                className="pair-qr"
+                alt={`QR ${pairInfo.code}`}
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(pairInfo.qrPayload)}`}
+              />
+              <p className="hint mono">{pairInfo.url}</p>
+              <button className="btn sm" type="button" onClick={() => void handleRegeneratePair()}>
+                Regenerar código
+              </button>
+            </div>
+          )}
+
+          <label>
+            Entrar com código do servidor
+            <div className="join-row">
+              <input
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="Ex: A3K9P2"
+                maxLength={8}
+              />
+              <button
+                className="btn primary"
+                type="button"
+                disabled={joining || !joinCode.trim()}
+                onClick={() => void handleJoinCode()}
+              >
+                {joining ? '…' : 'Parear'}
+              </button>
+            </div>
+          </label>
+
+          <label>
+            URL do servidor
+            <input
+              value={serverInput}
+              onChange={(e) => setServerInput(e.target.value)}
+              placeholder="http://192.168.1.10:8787"
+            />
+          </label>
+          <label>
+            Nome deste dispositivo
+            <input
+              value={deviceName}
+              onChange={(e) => setDeviceNameState(e.target.value)}
+              placeholder="MacBook, Linux-PC, Android..."
+            />
+          </label>
+          <button className="btn primary" onClick={saveSettings}>Salvar e reconectar</button>
+          <p className="hint">No Android, escaneie o QR ou use o código — depois adicione à tela inicial.</p>
+        </div>
+      )}
+
+      <div className="tabs">
+        <button className={tab === 'history' ? 'tab active' : 'tab'} onClick={() => setTab('history')}>
+          Histórico ({tab === 'history' ? countLabel : historyTotal})
+        </button>
+        <button className={tab === 'pinned' ? 'tab active' : 'tab'} onClick={() => setTab('pinned')}>
+          Fixo ({tab === 'pinned' ? countLabel : pinnedTotal})
+        </button>
+      </div>
+
+      {tab === 'pinned' && !isCompactView && (
+        <div className="pin-create">
+          <button className="btn" onClick={() => setCreateFixedModal(true)}>+ Novo item fixo</button>
+        </div>
+      )}
+
+      <div className="search-zone">
+        <input
+          className="search-input"
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar no histórico..."
+          autoFocus={isCompactView}
+        />
+        <div className="filter-row" role="group" aria-label="Filtros por tipo">
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className={`filter-chip${typeFilter === f.id ? ' active' : ''}`}
+              onClick={() => setTypeFilter(f.id)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <main className="items-grid">
+        {loading && <div className="empty">Carregando...</div>}
+        {!loading && items.length === 0 && (
+          <div className="empty">
+            {debouncedSearch || typeFilter !== 'all'
+              ? 'Nenhum item corresponde à busca/filtro.'
+              : tab === 'pinned'
+                ? 'Nenhum item fixo. Fixe algo do histórico ou crie um novo.'
+                : localMode
+                  ? 'Nada no histórico local. Copie algo neste aparelho — fica disponível aqui mesmo offline.'
+                  : 'Nada no histórico. Copie algo para sincronizar.'}
+          </div>
+        )}
+        {items.map((item) => (
+          <ItemCard
+            key={item.id}
+            item={item}
+            onCopy={() => handleCopy(item)}
+            onSelect={() => handleSelectItem(item)}
+            onPin={() => openPinModal(item)}
+            onUnpin={() => handleUnpin(item)}
+            onDelete={() => handleDelete(item)}
+            onContextMenu={(e) => openItemContextMenu(item, e)}
+            isPinnedTab={tab === 'pinned'}
+            compact={isCompactView}
+          />
+        ))}
+      </main>
+
+      {contextMenu && (
+        <>
+          <div className="ctx-backdrop" onClick={closeContextMenu} onContextMenu={(e) => {
+            e.preventDefault();
+            closeContextMenu();
+          }} />
+          <div
+            className="ctx-menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            role="menu"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="ctx-item"
+              onClick={() => {
+                const item = contextMenu.item;
+                closeContextMenu();
+                void handleCopy(item);
+              }}
+            >
+              Copiar
+            </button>
+            {contextMenu.item.pinned || tab === 'pinned' ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="ctx-item"
+                onClick={() => {
+                  const item = contextMenu.item;
+                  closeContextMenu();
+                  void handleUnpin(item);
+                }}
+              >
+                Desfixar
+              </button>
+            ) : (
+              <button
+                type="button"
+                role="menuitem"
+                className="ctx-item"
+                onClick={() => {
+                  const item = contextMenu.item;
+                  closeContextMenu();
+                  openPinModal(item);
+                }}
+              >
+                Fixar
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              className="ctx-item danger"
+              onClick={() => {
+                const item = contextMenu.item;
+                closeContextMenu();
+                void handleDelete(item, { skipConfirm: true });
+              }}
+            >
+              Excluir
+            </button>
+          </div>
+        </>
+      )}
+
+      {!loading && hasMore && (
+        <div className="pagination">
+          <button
+            className="btn"
+            disabled={loadingMore}
+            onClick={() => void loadPage({ reset: false, pinnedTab: tab === 'pinned' })}
+          >
+            {loadingMore ? 'Carregando...' : `Carregar mais (${items.length}/${total})`}
+          </button>
+        </div>
+      )}
+
+      {pinModal && (
+        <div className="modal-overlay" onClick={() => setPinModal(null)}>
+          <div className="modal modal-form" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Fixar item</h2>
+              <button className="icon-btn" onClick={() => setPinModal(null)}>✕</button>
+            </div>
+            <label className="form-label">
+              Nome (ex: Senha Wi-Fi)
+              <input
+                className="form-input"
+                value={pinModalLabel}
+                onChange={(e) => setPinModalLabel(e.target.value)}
+                placeholder="Opcional"
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && confirmPin()}
+              />
+            </label>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setPinModal(null)}>Cancelar</button>
+              <button className="btn primary" onClick={confirmPin}>Fixar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {createFixedModal && (
+        <div className="modal-overlay" onClick={() => setCreateFixedModal(false)}>
+          <div className="modal modal-form" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Novo item fixo</h2>
+              <button className="icon-btn" onClick={() => setCreateFixedModal(false)}>✕</button>
+            </div>
+            <label className="form-label">
+              Nome
+              <input
+                className="form-input"
+                value={createFixedLabel}
+                onChange={(e) => setCreateFixedLabel(e.target.value)}
+                placeholder="Senha Wi-Fi, Código 2FA..."
+                autoFocus
+              />
+            </label>
+            <label className="form-label">
+              Conteúdo
+              <textarea
+                className="form-input"
+                value={createFixedContent}
+                onChange={(e) => setCreateFixedContent(e.target.value)}
+                placeholder="Texto, senha ou código..."
+                rows={3}
+              />
+            </label>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setCreateFixedModal(false)}>Cancelar</button>
+              <button className="btn primary" onClick={handleCreatePin}>Criar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <div className="toast">{toast}</div>}
+    </div>
+  );
+}
+
+function ItemCard({
+  item,
+  onCopy,
+  onSelect,
+  onPin,
+  onUnpin,
+  onDelete,
+  onContextMenu,
+  isPinnedTab,
+  compact,
+}: {
+  item: ClipItem;
+  onCopy: () => void;
+  onSelect: () => void;
+  onPin: () => void;
+  onUnpin: () => void;
+  onDelete: () => void;
+  onContextMenu: (e: ReactMouseEvent) => void;
+  isPinnedTab: boolean;
+  compact?: boolean;
+}) {
+  const kind = itemDisplayKind(item);
+
+  return (
+    <article className={`card type-${kind}`} onClick={onSelect} onContextMenu={onContextMenu}>
+      <div className="card-header">
+        <span className="badge">{itemKindLabel(item)}</span>
+        <span className="time">{formatTime(item.updatedAt)}</span>
+      </div>
+
+      {item.label && <div className="card-label">{item.label}</div>}
+
+      {item.type === 'text' && (
+        <p className="card-text">{item.content?.slice(0, 200)}{(item.content?.length ?? 0) > 200 ? '…' : ''}</p>
+      )}
+
+      {item.type === 'image' && (
+        <img className="card-image" src={blobUrl(item)} alt={item.filename || 'imagem'} loading="lazy" />
+      )}
+
+      {item.type === 'file' && (
+        <div className="card-file">
+          <span className="file-icon">{kind === 'video' ? '🎬' : '📎'}</span>
+          <span>{item.filename}</span>
+          <span className="file-size">{formatSize(item.size)}</span>
+        </div>
+      )}
+
+      {item.deviceName && <div className="device-tag">{item.deviceName}</div>}
+
+      {!compact && (
+        <div className="card-actions" onClick={(e) => e.stopPropagation()}>
+          <button className="btn sm primary" onClick={onCopy}>Copiar</button>
+          {isPinnedTab ? (
+            <button className="btn sm" onClick={onUnpin}>Desfixar</button>
+          ) : (
+            <button className="btn sm" onClick={onPin}>Fixar</button>
+          )}
+          <button className="btn sm danger" onClick={onDelete}>Excluir</button>
+        </div>
+      )}
+    </article>
+  );
+}

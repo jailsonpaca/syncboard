@@ -1,0 +1,25 @@
+{
+  "name": "syncboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Clipboard sync across Mac, Linux and Android on local network",
+  "scripts": {
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install && cd ../daemon && npm install && cd ../desktop && npm install",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "build": "cd client && npm run build && cd ../server && npm run build",
+    "start": "cd server && npm start",
+    "desktop": "cd desktop && npm start",
+    "install:desktop": "bash install.sh",
+    "build:release": "bash build-release.sh",
+    "version:bump": "node scripts/bump-version.js",
+    "version:sync": "node scripts/bump-version.js --sync",
+    "release:latest-json": "node scripts/write-latest-json.js",
+    "serve:releases": "python3 -m http.server 8788 --bind 0.0.0.0 --directory desktop/release",
+    "daemon": "cd daemon && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

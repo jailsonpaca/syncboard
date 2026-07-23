@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.tsbuildinfo
+data/
+*.db
+*.db-shm
+*.db-wal
+.daemon-state.json
+.DS_Store
+dev-dist/
+desktop/node_modules/
+desktop/release/
+desktop/resources/
+*.log
+.env
+.env.*

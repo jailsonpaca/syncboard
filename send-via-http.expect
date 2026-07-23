@@ -1,0 +1,18 @@
+#!/usr/bin/env expect -f
+set timeout 300
+set user "jailson"
+set host "192.168.3.7"
+set mac_ip "192.168.3.93"
+
+set password [exec osascript -e "display dialog \"Senha SSH do Linux (${user}@${host}):\" default answer \"\" with hidden answer with title \"SyncBoard\"" -e "text returned of result"]
+
+spawn ssh -o StrictHostKeyChecking=accept-new ${user}@${host} "curl -fsSL http://${mac_ip}:8788/install-syncboard-linux.sh | bash"
+expect {
+  -re "(?i)password:" {
+    send "$password\r"
+    exp_continue
+  }
+  eof
+}
+catch wait result
+exit [lindex $result 3]
