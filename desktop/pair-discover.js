@@ -121,11 +121,13 @@ function parseJoinPayload(raw) {
 
 /**
  * Lista servidores SyncBoard anunciando na LAN (UDP multicast + beacons).
+ * Usa porta efêmera para receber respostas unicast (evita conflito com o beacon :18787).
  * @param {number} [timeoutMs]
  * @returns {Promise<Array<{ serverUrl: string, code?: string, hostname?: string, urls?: string[] }>>}
  */
 function discoverServers(timeoutMs = 3500) {
   return new Promise((resolve) => {
+    // Porta 0 = efêmera: o servidor responde em unicast para cá
     const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
     /** @type {Map<string, { serverUrl: string, code?: string, hostname?: string, urls?: string[] }>} */
     const found = new Map();
@@ -179,10 +181,9 @@ function discoverServers(timeoutMs = 3500) {
       }
     };
 
-    socket.bind(PAIR_UDP_PORT, () => {
+    socket.bind(0, () => {
       try {
         socket.setBroadcast(true);
-        socket.addMembership(PAIR_MULTICAST);
       } catch {
         /* ok */
       }

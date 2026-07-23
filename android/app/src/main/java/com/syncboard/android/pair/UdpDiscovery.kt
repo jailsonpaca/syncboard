@@ -26,21 +26,10 @@ object UdpDiscovery {
     suspend fun discoverServers(timeoutMs: Long = 3500): List<ServerInfo> = withContext(Dispatchers.IO) {
         val found = linkedMapOf<String, ServerInfo>()
         val group = InetAddress.getByName(MULTICAST)
-        MulticastSocket(null).use { socket ->
-            socket.reuseAddress = true
+        // Porta 0 = efêmera; o servidor responde em unicast (evita conflito com o beacon :18787)
+        MulticastSocket().use { socket ->
             socket.soTimeout = 400
-            socket.bind(InetSocketAddress(PORT))
-            try {
-                val nif = NetworkInterface.getNetworkInterfaces()?.toList()
-                    ?.firstOrNull { it.isUp && !it.isLoopback && it.supportsMulticast() }
-                if (nif != null) socket.joinGroup(InetSocketAddress(group, PORT), nif)
-                else socket.joinGroup(group)
-            } catch (_: Exception) {
-                try {
-                    socket.joinGroup(group)
-                } catch (_: Exception) {
-                }
-            }
+            socket.reuseAddress = true
 
             fun sendDiscover() {
                 val query = JSONObject()
