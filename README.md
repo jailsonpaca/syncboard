@@ -1,6 +1,8 @@
 # SyncBoard
 
-Clipboard compartilhado na sua Wi‑Fi — sincroniza **texto, imagens e arquivos** entre Mac, Linux e Android, sem nuvem.
+Clipboard compartilhado na sua Wi‑Fi — sincroniza **texto, imagens e arquivos** entre Mac, Windows e Linux, sem nuvem.
+
+**Android nativo:** no roadmap (ainda indisponível).
 
 ## Baixar
 
@@ -26,18 +28,19 @@ cd ~/mesa/projects/syncboard
 | Plataforma | Onde fica | Atalho |
 |------------|-----------|--------|
 | **Mac** | Barra de menu | `Alt+V` (⌥V) |
+| **Windows** | Bandeja do sistema | `Alt+V` |
 | **Linux** | System tray | `Alt+V` |
-| **Android** | Chrome → IP do servidor → Tela inicial | — |
+| **Android** | Roadmap — app nativo futuro | — |
 
 ## Pareamento (sem digitar IP)
 
 1. Na máquina **servidor**, ative “Servidor local”.
 2. Abra SyncBoard → ⚙ → painel **Conectar dispositivos** (código + QR).
-3. No outro aparelho:
-   - **Desktop:** Preferências → cole o código → **Parear**
-   - **Android/web:** ⚙ → “Entrar com código” ou escaneie o QR
+3. No outro desktop (Mac/Windows/Linux): Preferências → cole o código → **Parear**
 
 Os dispositivos precisam estar na **mesma Wi‑Fi**.
+
+> Android nativo está no **roadmap** e ainda não está disponível.
 
 ## Atualizações
 
@@ -56,8 +59,7 @@ Os dispositivos precisam estar na **mesma Wi‑Fi**.
 2. Preferências → desmarque “Servidor local” → **Parear** com o código.
 
 ### Android
-1. Escaneie o QR (ou abra `http://IP:8787`).
-2. Chrome → **Adicionar à tela inicial**.
+App nativo no roadmap (indisponível). Em breve.
 
 ## Comandos
 

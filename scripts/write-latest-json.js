@@ -28,12 +28,25 @@ function findAsset(patterns) {
 }
 
 const macDmg = findAsset([/^SyncBoard-.*\.dmg$/, /^SyncBoard.*\.dmg$/]);
-const macZip = findAsset([/^SyncBoard-.*-mac\.zip$/, /^SyncBoard.*\.zip$/]);
+const macZip = findAsset([
+  /^SyncBoard-.*-mac\.zip$/i,
+  /^SyncBoard-.*-darwin.*\.zip$/i,
+]);
 const linuxAppImage = findAsset([/^SyncBoard-.*\.AppImage$/, /SyncBoard.*\.AppImage$/]);
 const linuxTar = findAsset([
   'SyncBoard-linux-x64.tar.gz',
   /^SyncBoard-.*-x64\.tar\.gz$/,
   /^SyncBoard-.*\.tar\.gz$/,
+]);
+const winSetup = findAsset([
+  /^SyncBoard-.*-setup\.exe$/i,
+  /^SyncBoard Setup.*\.exe$/i,
+  /^SyncBoard-.*\.exe$/i,
+]);
+const winZip = findAsset([
+  /^SyncBoard-.*-win\.zip$/i,
+  /^SyncBoard-.*-windows.*\.zip$/i,
+  /^SyncBoard-.*-x64\.zip$/i,
 ]);
 
 const latest = {
@@ -41,17 +54,28 @@ const latest = {
   publishedAt: new Date().toISOString(),
   downloadPage,
   github: { owner, repo, tag: `v${version}` },
+  roadmap: {
+    android: {
+      status: 'roadmap',
+      available: false,
+      note: 'App nativo Android planejado; indisponível no momento.',
+    },
+  },
   assets: {
     macDmg: macDmg ? `${base}/${macDmg}` : null,
     macZip: macZip ? `${base}/${macZip}` : null,
     linuxAppImage: linuxAppImage ? `${base}/${linuxAppImage}` : null,
     linuxTar: linuxTar ? `${base}/${linuxTar}` : null,
+    winSetup: winSetup ? `${base}/${winSetup}` : null,
+    winZip: winZip ? `${base}/${winZip}` : null,
   },
   files: {
     macDmg,
     macZip,
     linuxAppImage,
     linuxTar,
+    winSetup,
+    winZip,
   },
 };
 

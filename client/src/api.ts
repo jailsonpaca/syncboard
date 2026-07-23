@@ -349,6 +349,8 @@ export type UpdateStatus = {
     macZip?: string | null;
     linuxAppImage?: string | null;
     linuxTar?: string | null;
+    winSetup?: string | null;
+    winZip?: string | null;
   } | null;
 };
 

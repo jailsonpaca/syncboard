@@ -103,6 +103,20 @@
         "Categories": "Utility;Network;"
       }
     },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "icons/icon.png",
+      "artifactName": "SyncBoard-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "SyncBoard"
+    },
     "dmg": {
       "title": "SyncBoard"
     },

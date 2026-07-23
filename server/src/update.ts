@@ -14,6 +14,11 @@ export type LatestManifest = {
     macZip?: string | null;
     linuxAppImage?: string | null;
     linuxTar?: string | null;
+    winSetup?: string | null;
+    winZip?: string | null;
+  };
+  roadmap?: {
+    android?: { status: string; available: boolean; note?: string };
   };
 };
 
@@ -130,9 +135,18 @@ export async function fetchLatestManifest(force = false): Promise<LatestManifest
           github: { owner, repo, tag: String(data.tag_name) },
           assets: {
             macDmg: find(/\.dmg$/i),
-            macZip: find(/\.zip$/i),
+            macZip: find(/-mac\.zip$/i),
             linuxAppImage: find(/\.AppImage$/i),
             linuxTar: find(/\.tar\.gz$/i),
+            winSetup: find(/\.exe$/i),
+            winZip: find(/-win\.zip$/i),
+          },
+          roadmap: {
+            android: {
+              status: 'roadmap',
+              available: false,
+              note: 'App nativo Android planejado; indisponível no momento.',
+            },
           },
         };
         cache = { checkedAt: Date.now(), manifest };

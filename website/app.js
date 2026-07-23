@@ -5,6 +5,7 @@
 
   const $ = (id) => document.getElementById(id);
   const btnMac = $('btn-mac');
+  const btnWindows = $('btn-windows');
   const btnLinux = $('btn-linux');
   const versionLine = $('version-line');
   const footerVer = $('footer-ver');
@@ -26,11 +27,21 @@
     if (label) btn.textContent = label;
   }
 
+  function bind(btn, url, soonLabel) {
+    if (url) {
+      btn.href = url;
+      btn.classList.remove('is-disabled');
+      btn.removeAttribute('aria-disabled');
+    } else {
+      disable(btn, soonLabel);
+    }
+  }
+
   async function load() {
     try {
-      // Tenta latest.json primeiro (URLs estáveis do nosso manifesto)
       const latestUrl = `${gh}/releases/latest/download/latest.json`;
       let macUrl = null;
+      let winUrl = null;
       let linuxUrl = null;
       let version = null;
 
@@ -40,6 +51,7 @@
           const latest = await lr.json();
           version = latest.version;
           macUrl = latest.assets?.macDmg || latest.assets?.macZip;
+          winUrl = latest.assets?.winSetup || latest.assets?.winZip;
           linuxUrl = latest.assets?.linuxAppImage || latest.assets?.linuxTar;
         }
       } catch {
@@ -56,8 +68,12 @@
         const assets = data.assets || [];
         macUrl = pickAsset(assets, [
           (n) => /\.dmg$/i.test(n),
-          (n) => /\.zip$/i.test(n) && /mac|darwin/i.test(n),
-          (n) => /\.zip$/i.test(n),
+          (n) => /-mac\.zip$/i.test(n),
+          (n) => /darwin/i.test(n) && /\.zip$/i.test(n),
+        ]);
+        winUrl = pickAsset(assets, [
+          (n) => /\.exe$/i.test(n),
+          (n) => /-win\.zip$/i.test(n) || /windows/i.test(n),
         ]);
         linuxUrl = pickAsset(assets, [
           (n) => /\.AppImage$/i.test(n),
@@ -67,26 +83,19 @@
       }
 
       versionLine.textContent = version
-        ? `Versão ${version} · links direto do GitHub Releases`
+        ? `Versão ${version} · Mac, Windows e Linux · Android no roadmap`
         : 'Release ainda não publicada';
       footerVer.textContent = version ? `v${version}` : '';
 
-      if (macUrl) {
-        btnMac.href = macUrl;
-      } else {
-        disable(btnMac, 'Mac em breve');
-      }
-
-      if (linuxUrl) {
-        btnLinux.href = linuxUrl;
-      } else {
-        disable(btnLinux, 'Linux em breve');
-      }
+      bind(btnMac, macUrl, 'Mac em breve');
+      bind(btnWindows, winUrl, 'Windows em breve');
+      bind(btnLinux, linuxUrl, 'Linux em breve');
     } catch (err) {
       console.warn(err);
       versionLine.textContent =
         'Não foi possível carregar o release. Veja o GitHub ou publique a tag v*.';
       btnMac.href = `${gh}/releases`;
+      btnWindows.href = `${gh}/releases`;
       btnLinux.href = `${gh}/releases`;
     }
   }

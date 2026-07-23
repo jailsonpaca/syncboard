@@ -55,6 +55,8 @@ if [ "$OS" = "Darwin" ]; then
   npx electron-builder --mac dmg zip --x64
   # AppImage + tar.gz (install-linux.sh usa o tar)
   npx electron-builder --linux AppImage tar.gz --x64
+elif [[ "$OS" == MINGW* || "$OS" == MSYS* || "$OS" == CYGWIN* || "$OS" == "Windows_NT" ]]; then
+  npx electron-builder --win nsis zip --x64
 else
   npx electron-builder --linux AppImage tar.gz --x64
 fi
