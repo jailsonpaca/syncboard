@@ -2,8 +2,16 @@
   "name": "syncboard-desktop",
   "version": "1.0.0",
   "description": "SyncBoard — clipboard sync na rede local",
+  "homepage": "https://syncboard.jpinnovation.com.br",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jailsonpaca/syncboard.git"
+  },
   "main": "main.js",
-  "author": "SyncBoard",
+  "author": {
+    "name": "Jailson Pacagnan",
+    "email": "jailsonpaca@users.noreply.github.com"
+  },
   "scripts": {
     "icons": "node generate-icons.js",
     "start": "node generate-icons.js && electron . --no-sandbox",
@@ -88,6 +96,7 @@
       "icon": "icons/icon.png",
       "executableName": "syncboard",
       "artifactName": "SyncBoard-${version}-${arch}.${ext}",
+      "maintainer": "Jailson Pacagnan <jailsonpaca@users.noreply.github.com>",
       "desktop": {
         "Name": "SyncBoard",
         "Comment": "Clipboard sync na rede local",
