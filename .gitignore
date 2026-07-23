@@ -14,3 +14,11 @@ desktop/resources/
 *.log
 .env
 .env.*
+android/local.properties
+android/keystore.properties
+android/**/build/
+android/.gradle/
+android/*.apk
+android/*.aab
+android/release.keystore
+android/app/release/

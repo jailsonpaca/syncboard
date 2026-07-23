@@ -231,6 +231,7 @@ jobs:
           const linuxTar = pick(/linux.*\.tar\.gz$/i, /\.tar\.gz$/i);
           const winSetup = pick(/Setup.*\.exe$/i, /\.exe$/i);
           const winZip = pick(/-win\.zip$/i, /windows.*\.zip$/i, /win32.*\.zip$/i);
+          const androidApk = pick(/-arm64\.apk$/i, /\.apk$/i);
           let downloadPage = process.env.SYNCBOARD_DOWNLOAD_URL || '';
           try {
             downloadPage = JSON.parse(fs.readFileSync('release.config.json', 'utf8')).downloadUrl || downloadPage;
@@ -241,11 +242,13 @@ jobs:
             downloadPage,
             github: { owner, repo, tag: `v${version}` },
             roadmap: {
-              android: {
-                status: 'roadmap',
-                available: false,
-                note: 'App nativo Android planejado; indisponível no momento.',
-              },
+              android: androidApk
+                ? { status: 'available', available: true, note: 'APK nativo arm64' }
+                : {
+                    status: 'roadmap',
+                    available: false,
+                    note: 'Gere localmente: ./scripts/build-android.sh && ./scripts/publish-android-apk.sh',
+                  },
             },
             assets: {
               macDmg: macDmg ? `${base}/${macDmg}` : null,
@@ -254,8 +257,9 @@ jobs:
               linuxTar: linuxTar ? `${base}/${linuxTar}` : null,
               winSetup: winSetup ? `${base}/${winSetup}` : null,
               winZip: winZip ? `${base}/${winZip}` : null,
+              androidApk: androidApk ? `${base}/${androidApk}` : null,
             },
-            files: { macDmg, macZip, linuxAppImage, linuxTar, winSetup, winZip },
+            files: { macDmg, macZip, linuxAppImage, linuxTar, winSetup, winZip, androidApk },
           };
           fs.writeFileSync(path.join(dir, 'latest.json'), JSON.stringify(latest, null, 2));
           console.log(latest);

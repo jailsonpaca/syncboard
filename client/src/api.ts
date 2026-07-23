@@ -351,6 +351,7 @@ export type UpdateStatus = {
     linuxTar?: string | null;
     winSetup?: string | null;
     winZip?: string | null;
+    androidApk?: string | null;
   } | null;
 };
 

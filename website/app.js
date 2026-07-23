@@ -7,9 +7,11 @@
   const btnMac = $('btn-mac');
   const btnWindows = $('btn-windows');
   const btnLinux = $('btn-linux');
+  const btnAndroid = $('btn-android');
   const versionLine = $('version-line');
   const footerVer = $('footer-ver');
   const githubLink = $('github-link');
+  const androidRoadmap = $('android-roadmap');
 
   githubLink.href = gh;
 
@@ -32,9 +34,10 @@
       btn.href = url;
       btn.classList.remove('is-disabled');
       btn.removeAttribute('aria-disabled');
-    } else {
-      disable(btn, soonLabel);
+      return true;
     }
+    disable(btn, soonLabel);
+    return false;
   }
 
   async function load() {
@@ -43,6 +46,7 @@
       let macUrl = null;
       let winUrl = null;
       let linuxUrl = null;
+      let androidUrl = null;
       let version = null;
 
       try {
@@ -53,6 +57,7 @@
           macUrl = latest.assets?.macDmg || latest.assets?.macZip;
           winUrl = latest.assets?.winSetup || latest.assets?.winZip;
           linuxUrl = latest.assets?.linuxAppImage || latest.assets?.linuxTar;
+          androidUrl = latest.assets?.androidApk || null;
         }
       } catch {
         /* fallback API */
@@ -69,27 +74,31 @@
         macUrl = pickAsset(assets, [
           (n) => /\.dmg$/i.test(n),
           (n) => /-mac\.zip$/i.test(n),
-          (n) => /darwin/i.test(n) && /\.zip$/i.test(n),
         ]);
         winUrl = pickAsset(assets, [
           (n) => /\.exe$/i.test(n),
-          (n) => /-win\.zip$/i.test(n) || /windows/i.test(n),
+          (n) => /-win\.zip$/i.test(n),
         ]);
         linuxUrl = pickAsset(assets, [
           (n) => /\.AppImage$/i.test(n),
-          (n) => /linux/i.test(n) && /\.tar\.gz$/i.test(n),
           (n) => /\.tar\.gz$/i.test(n),
         ]);
+        androidUrl = pickAsset(assets, [(n) => /\.apk$/i.test(n)]);
       }
 
       versionLine.textContent = version
-        ? `Versão ${version} · Mac, Windows e Linux · Android no roadmap`
+        ? `Versão ${version} · links do GitHub Releases`
         : 'Release ainda não publicada';
       footerVer.textContent = version ? `v${version}` : '';
 
       bind(btnMac, macUrl, 'Mac em breve');
       bind(btnWindows, winUrl, 'Windows em breve');
       bind(btnLinux, linuxUrl, 'Linux em breve');
+      const androidOk = bind(btnAndroid, androidUrl, 'Android em breve');
+      if (androidOk) {
+        androidRoadmap.innerHTML =
+          '<span class="badge-roadmap">Disponível</span> APK nativo arm64 — pareie com o código do servidor.';
+      }
     } catch (err) {
       console.warn(err);
       versionLine.textContent =
@@ -97,6 +106,7 @@
       btnMac.href = `${gh}/releases`;
       btnWindows.href = `${gh}/releases`;
       btnLinux.href = `${gh}/releases`;
+      btnAndroid.href = `${gh}/releases`;
     }
   }
 

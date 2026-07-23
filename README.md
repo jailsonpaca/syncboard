@@ -2,7 +2,7 @@
 
 Clipboard compartilhado na sua Wi‑Fi — sincroniza **texto, imagens e arquivos** entre Mac, Windows e Linux, sem nuvem.
 
-**Android nativo:** no roadmap (ainda indisponível).
+**Android nativo:** pasta [`android/`](android/) — build local (fora do CI).
 
 ## Baixar
 
@@ -30,7 +30,7 @@ cd ~/mesa/projects/syncboard
 | **Mac** | Barra de menu | `Alt+V` (⌥V) |
 | **Windows** | Bandeja do sistema | `Alt+V` |
 | **Linux** | System tray | `Alt+V` |
-| **Android** | Roadmap — app nativo futuro | — |
+| **Android** | App nativo (APK arm64) | — |
 
 ## Pareamento (sem digitar IP)
 
@@ -58,8 +58,14 @@ Os dispositivos precisam estar na **mesma Wi‑Fi**.
 1. Instale o app.
 2. Preferências → desmarque “Servidor local” → **Parear** com o código.
 
-### Android
-App nativo no roadmap (indisponível). Em breve.
+### Android (APK local)
+
+```bash
+./scripts/build-android.sh              # gera desktop/release/SyncBoard-<ver>-arm64.apk
+./scripts/publish-android-apk.sh v1.0.1 # sobe no GitHub Release + atualiza latest.json
+```
+
+Requisitos: JDK 17, Android SDK. O APK **não** entra no git nem no GitHub Actions.
 
 ## Comandos
 

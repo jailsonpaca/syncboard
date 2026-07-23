@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SyncBoard — clipboard na sua rede</title>
-  <meta name="description" content="Sincronize texto, imagens e arquivos entre Mac, Windows e Linux na mesma Wi‑Fi. Android nativo no roadmap." />
+  <meta name="description" content="Sincronize texto, imagens e arquivos entre Mac, Windows, Linux e Android na mesma Wi‑Fi." />
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
 </head>
@@ -23,16 +23,17 @@
   <main>
     <section class="hero" id="download">
       <h1 class="logo-hero">SyncBoard</h1>
-      <p class="tagline">Clipboard compartilhado na sua Wi‑Fi — Mac, Windows e Linux, sem nuvem.</p>
+      <p class="tagline">Clipboard compartilhado na sua Wi‑Fi — Mac, Windows, Linux e Android, sem nuvem.</p>
       <div class="cta-row">
         <a class="btn primary" id="btn-mac" href="#">Baixar para Mac</a>
         <a class="btn" id="btn-windows" href="#">Baixar para Windows</a>
         <a class="btn" id="btn-linux" href="#">Baixar para Linux</a>
+        <a class="btn" id="btn-android" href="#">Baixar para Android</a>
       </div>
       <p class="meta" id="version-line">Carregando última versão…</p>
-      <p class="roadmap-note">
+      <p class="roadmap-note" id="android-roadmap">
         <span class="badge-roadmap">Roadmap</span>
-        Android nativo — planejado, ainda indisponível.
+        Android nativo — APK publicado quando disponível no Release.
       </p>
     </section>
 
@@ -46,7 +47,7 @@
           <strong>Ative</strong> “Servidor local” e mostre o código/QR nas configurações.
         </li>
         <li>
-          <strong>Pareie</strong> Mac, Windows ou Linux com o código — sem digitar IP.
+          <strong>Pareie</strong> os outros dispositivos com o código — sem digitar IP.
         </li>
       </ol>
     </section>
@@ -54,22 +55,9 @@
     <section class="section muted">
       <h2>Atualizações</h2>
       <p>
-        O app avisa quando há nova versão. Você confirma e atualiza em um toque —
-        cliente e servidor embutido sobem juntos.
+        O app desktop avisa quando há nova versão. O APK Android é gerado localmente
+        e anexado ao GitHub Release.
       </p>
-    </section>
-
-    <section class="section" id="roadmap">
-      <h2>Roadmap</h2>
-      <ul class="roadmap-list">
-        <li>
-          <span class="badge-roadmap">Em breve</span>
-          <div>
-            <strong>App nativo Android</strong>
-            <p>Cliente dedicado no futuro. Por enquanto o SyncBoard desktop cobre Mac, Windows e Linux.</p>
-          </div>
-        </li>
-      </ul>
     </section>
   </main>
 

@@ -16,6 +16,7 @@ export type LatestManifest = {
     linuxTar?: string | null;
     winSetup?: string | null;
     winZip?: string | null;
+    androidApk?: string | null;
   };
   roadmap?: {
     android?: { status: string; available: boolean; note?: string };

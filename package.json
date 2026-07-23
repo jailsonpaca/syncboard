@@ -16,6 +16,8 @@
     "version:bump": "node scripts/bump-version.js",
     "version:sync": "node scripts/bump-version.js --sync",
     "release:latest-json": "node scripts/write-latest-json.js",
+    "android:build": "bash scripts/build-android.sh",
+    "android:publish": "bash scripts/publish-android-apk.sh",
     "serve:releases": "python3 -m http.server 8788 --bind 0.0.0.0 --directory desktop/release",
     "daemon": "cd daemon && npm start"
   },

@@ -48,6 +48,10 @@ const winZip = findAsset([
   /^SyncBoard-.*-windows.*\.zip$/i,
   /^SyncBoard-.*-x64\.zip$/i,
 ]);
+const androidApk = findAsset([
+  /^SyncBoard-.*-arm64\.apk$/i,
+  /^SyncBoard-.*\.apk$/i,
+]);
 
 const latest = {
   version,
@@ -55,11 +59,13 @@ const latest = {
   downloadPage,
   github: { owner, repo, tag: `v${version}` },
   roadmap: {
-    android: {
-      status: 'roadmap',
-      available: false,
-      note: 'App nativo Android planejado; indisponível no momento.',
-    },
+    android: androidApk
+      ? { status: 'available', available: true, note: 'APK nativo arm64' }
+      : {
+          status: 'roadmap',
+          available: false,
+          note: 'App nativo Android — gere com ./scripts/build-android.sh e publique com ./scripts/publish-android-apk.sh',
+        },
   },
   assets: {
     macDmg: macDmg ? `${base}/${macDmg}` : null,
@@ -68,6 +74,7 @@ const latest = {
     linuxTar: linuxTar ? `${base}/${linuxTar}` : null,
     winSetup: winSetup ? `${base}/${winSetup}` : null,
     winZip: winZip ? `${base}/${winZip}` : null,
+    androidApk: androidApk ? `${base}/${androidApk}` : null,
   },
   files: {
     macDmg,
@@ -76,6 +83,7 @@ const latest = {
     linuxTar,
     winSetup,
     winZip,
+    androidApk,
   },
 };
 
