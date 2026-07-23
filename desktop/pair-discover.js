@@ -119,8 +119,83 @@ function parseJoinPayload(raw) {
   return null;
 }
 
+/**
+ * Lista servidores SyncBoard anunciando na LAN (UDP multicast + beacons).
+ * @param {number} [timeoutMs]
+ * @returns {Promise<Array<{ serverUrl: string, code?: string, hostname?: string, urls?: string[] }>>}
+ */
+function discoverServers(timeoutMs = 3500) {
+  return new Promise((resolve) => {
+    const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    /** @type {Map<string, { serverUrl: string, code?: string, hostname?: string, urls?: string[] }>} */
+    const found = new Map();
+    let closed = false;
+
+    const ingest = (data) => {
+      if (data?.type !== 'syncboard-pair' || !data.url) return;
+      const serverUrl = String(data.url).replace(/\/$/, '');
+      const prev = found.get(serverUrl);
+      found.set(serverUrl, {
+        serverUrl,
+        code: data.code ? String(data.code).toUpperCase() : prev?.code,
+        hostname: data.hostname ? String(data.hostname) : prev?.hostname,
+        urls: Array.isArray(data.urls) ? data.urls.map((u) => String(u).replace(/\/$/, '')) : prev?.urls,
+      });
+    };
+
+    const finish = () => {
+      if (closed) return;
+      closed = true;
+      try {
+        socket.close();
+      } catch {
+        /* ok */
+      }
+      resolve([...found.values()].sort((a, b) => a.serverUrl.localeCompare(b.serverUrl)));
+    };
+
+    const timer = setTimeout(finish, timeoutMs);
+
+    socket.on('error', () => {
+      clearTimeout(timer);
+      finish();
+    });
+
+    socket.on('message', (msg) => {
+      try {
+        ingest(JSON.parse(msg.toString('utf8')));
+      } catch {
+        /* ignore */
+      }
+    });
+
+    const sendDiscover = () => {
+      const query = Buffer.from(JSON.stringify({ type: 'syncboard-discover', v: 1 }), 'utf8');
+      try {
+        socket.send(query, PAIR_UDP_PORT, PAIR_MULTICAST);
+        socket.send(query, PAIR_UDP_PORT, '255.255.255.255');
+      } catch {
+        /* ok */
+      }
+    };
+
+    socket.bind(PAIR_UDP_PORT, () => {
+      try {
+        socket.setBroadcast(true);
+        socket.addMembership(PAIR_MULTICAST);
+      } catch {
+        /* ok */
+      }
+      sendDiscover();
+      // segundo ping — captura quem acaba de subir
+      setTimeout(sendDiscover, 900);
+    });
+  });
+}
+
 module.exports = {
   discoverByCode,
+  discoverServers,
   parseJoinPayload,
   PAIR_MULTICAST,
   PAIR_UDP_PORT,

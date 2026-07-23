@@ -38,6 +38,7 @@ export type PairInfo = {
   qrPayload: string;
   joinUrl: string;
   udpPort: number;
+  hostname: string;
 };
 
 export class PairService {
@@ -76,6 +77,7 @@ export class PairService {
       qrPayload,
       joinUrl: `${url}/?join=${this.code}`,
       udpPort: PAIR_UDP_PORT,
+      hostname: os.hostname(),
     };
   }
 
@@ -99,6 +101,7 @@ export class PairService {
         url: info.url,
         urls: info.urls,
         token: info.token,
+        hostname: os.hostname(),
       }),
       'utf8'
     );
@@ -117,7 +120,15 @@ export class PairService {
     socket.on('message', (msg, rinfo) => {
       try {
         const data = JSON.parse(msg.toString('utf8'));
-        if (data?.type === 'syncboard-pair-query' && data.code) {
+        const type = String(data?.type || '');
+
+        // Busca aberta na LAN (lista todos os servidores SyncBoard)
+        if (type === 'syncboard-discover') {
+          socket.send(this.beaconPayload(), rinfo.port, rinfo.address);
+          return;
+        }
+
+        if (type === 'syncboard-pair-query' && data.code) {
           const hit = this.join(String(data.code));
           if (!hit) return;
           const reply = Buffer.from(
@@ -128,6 +139,7 @@ export class PairService {
               url: hit.serverUrl,
               urls: hit.urls,
               token: hit.token,
+              hostname: os.hostname(),
             }),
             'utf8'
           );

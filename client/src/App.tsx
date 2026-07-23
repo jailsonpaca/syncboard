@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import QRCode from 'qrcode';
 import type { ClipItem, TypeFilter } from './types';
 import {
   blobUrl,
@@ -16,12 +17,14 @@ import {
   isUsingLocalFallback,
   itemDisplayKind,
   itemKindLabel,
+  discoverLanServers,
   joinWithCodeWeb,
   regeneratePairCode,
   setDeviceName,
   setServerUrl,
   touchItem,
   updateItem,
+  type DiscoveredServer,
   type PairInfo,
   type UpdateStatus,
 } from './api';
@@ -94,8 +97,12 @@ export default function App() {
   const [createFixedContent, setCreateFixedContent] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pairInfo, setPairInfo] = useState<PairInfo | null>(null);
+  const [pairQrDataUrl, setPairQrDataUrl] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [joining, setJoining] = useState(false);
+  const [lanServers, setLanServers] = useState<DiscoveredServer[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [desktopUpdate, setDesktopUpdate] = useState<{
     version: string;
@@ -208,14 +215,19 @@ export default function App() {
     if (join) setJoinCode(join.toUpperCase());
   }, []);
 
+  const refreshPairInfo = useCallback(async () => {
+    try {
+      const info = await fetchPairInfo();
+      setPairInfo(info);
+    } catch {
+      setPairInfo(null);
+      setPairQrDataUrl(null);
+    }
+  }, []);
+
   useEffect(() => {
     void (async () => {
-      try {
-        const info = await fetchPairInfo();
-        setPairInfo(info);
-      } catch {
-        setPairInfo(null);
-      }
+      await refreshPairInfo();
       try {
         const st = await fetchUpdateStatus(false);
         setUpdateStatus(st);
@@ -223,7 +235,58 @@ export default function App() {
         /* ok */
       }
     })();
-  }, [connected]);
+  }, [connected, refreshPairInfo]);
+
+  const scanLanServers = useCallback(async () => {
+    setDiscovering(true);
+    setDiscoverError(null);
+    try {
+      const list = await discoverLanServers();
+      setLanServers(list);
+      if (!list.length) setDiscoverError('Nenhum SyncBoard encontrado na rede local');
+    } catch (err) {
+      setLanServers([]);
+      setDiscoverError((err as Error).message || 'Falha na busca');
+    } finally {
+      setDiscovering(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showSettings) return;
+    void refreshPairInfo();
+    void scanLanServers();
+  }, [showSettings, refreshPairInfo, scanLanServers]);
+
+  const selectLanServer = useCallback(
+    (serverUrl: string) => {
+      setServerInput(serverUrl.replace(/\/$/, ''));
+      showToast(`Selecionado: ${serverUrl}`);
+    },
+    [showToast]
+  );
+
+  useEffect(() => {
+    if (!pairInfo?.qrPayload) {
+      setPairQrDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void QRCode.toDataURL(pairInfo.qrPayload, {
+      width: 180,
+      margin: 1,
+      color: { dark: '#0f0f12', light: '#ffffff' },
+    })
+      .then((url) => {
+        if (!cancelled) setPairQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setPairQrDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pairInfo?.qrPayload]);
 
   useEffect(() => {
     if (!window.syncboard?.onUpdateStatus) return;
@@ -531,22 +594,77 @@ export default function App() {
 
       {showSettings && (
         <div className="settings-panel">
-          {pairInfo && (
+          {pairInfo ? (
             <div className="pair-panel">
               <div className="pair-title">Conectar dispositivos</div>
               <p className="hint">Na mesma Wi‑Fi: escaneie o QR ou digite o código no outro aparelho.</p>
               <div className="pair-code">{pairInfo.code}</div>
-              <img
-                className="pair-qr"
-                alt={`QR ${pairInfo.code}`}
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(pairInfo.qrPayload)}`}
-              />
+              {pairQrDataUrl ? (
+                <img className="pair-qr" alt={`QR ${pairInfo.code}`} src={pairQrDataUrl} />
+              ) : (
+                <p className="hint">Gerando QR…</p>
+              )}
               <p className="hint mono">{pairInfo.url}</p>
+              {pairInfo.urls?.length > 1 && (
+                <p className="hint mono">{pairInfo.urls.slice(1).join(' · ')}</p>
+              )}
               <button className="btn sm" type="button" onClick={() => void handleRegeneratePair()}>
                 Regenerar código
               </button>
             </div>
+          ) : (
+            <div className="pair-panel">
+              <div className="pair-title">Código / QR indisponível</div>
+              <p className="hint">
+                O servidor conectado não expõe pareamento. Se este Mac for o host, reinicie o SyncBoard
+                (ou o processo na porta 8787) e abra as configurações de novo.
+              </p>
+            </div>
           )}
+
+          <div className="discover-panel">
+            <div className="discover-head">
+              <div className="pair-title">Servidores na rede</div>
+              <button
+                className="btn sm"
+                type="button"
+                disabled={discovering}
+                onClick={() => void scanLanServers()}
+              >
+                {discovering ? 'Buscando…' : 'Buscar de novo'}
+              </button>
+            </div>
+            <p className="hint">Dispositivos com SyncBoard aberto na mesma Wi‑Fi.</p>
+            {discovering && !lanServers.length && (
+              <p className="hint">Procurando na rede…</p>
+            )}
+            {!discovering && discoverError && !lanServers.length && (
+              <p className="hint">{discoverError}</p>
+            )}
+            {lanServers.length > 0 && (
+              <ul className="discover-list">
+                {lanServers.map((s) => {
+                  const current = serverInput.replace(/\/$/, '') === s.serverUrl;
+                  const label = s.hostname || s.serverUrl.replace(/^https?:\/\//, '');
+                  return (
+                    <li key={s.serverUrl}>
+                      <button
+                        type="button"
+                        className={`discover-item${current ? ' active' : ''}`}
+                        onClick={() => selectLanServer(s.serverUrl)}
+                      >
+                        <span className="discover-name">{label}</span>
+                        <span className="discover-meta mono">
+                          {s.serverUrl}
+                          {s.code ? ` · ${s.code}` : ''}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
 
           <label>
             Entrar com código do servidor
@@ -585,7 +703,7 @@ export default function App() {
             />
           </label>
           <button className="btn primary" onClick={saveSettings}>Salvar e reconectar</button>
-          <p className="hint">Pareie outros desktops com o código/QR. Android nativo está no roadmap (ainda indisponível).</p>
+          <p className="hint">No Android, escaneie o QR ou digite o código na tela de pareamento do app.</p>
         </div>
       )}
 

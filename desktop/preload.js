@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('syncboard', {
   /** Copia o item e cola no app que estava focado (atalho / popup). */
   pasteItem: (item) => ipcRenderer.invoke('paste-item', item),
   joinWithCode: (code) => ipcRenderer.invoke('join-with-code', code),
+  discoverServers: () => ipcRenderer.invoke('discover-servers'),
   checkUpdate: () => ipcRenderer.invoke('check-update'),
   downloadUpdate: () => ipcRenderer.invoke('download-update'),
   installUpdate: () => ipcRenderer.invoke('install-update'),

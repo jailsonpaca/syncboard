@@ -140,6 +140,65 @@ body {
   display: block;
 }
 
+.discover-panel {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.discover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.discover-head .pair-title {
+  margin-bottom: 0;
+}
+
+.discover-list {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.discover-item {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.discover-item:hover {
+  border-color: var(--accent, #7c6af7);
+}
+
+.discover-item.active {
+  border-color: var(--accent, #7c6af7);
+  background: rgba(124, 106, 247, 0.12);
+}
+
+.discover-name {
+  font-weight: 600;
+}
+
+.discover-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .join-row {
   display: flex;
   gap: 8px;

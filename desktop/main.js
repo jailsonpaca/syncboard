@@ -11,7 +11,7 @@ const {
   globalShortcut,
   Notification,
 } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
@@ -24,7 +24,7 @@ const appPaths = require('./paths');
 const offlineCache = require('./offline-cache');
 const { createOfflineHub } = require('./offline-hub');
 const { simulatePaste, sleep } = require('./paste');
-const { discoverByCode, parseJoinPayload } = require('./pair-discover');
+const { discoverByCode, discoverServers, parseJoinPayload } = require('./pair-discover');
 const { setupUpdater, loadReleaseConfig } = require('./updater');
 const {
   readClipboardFilePaths,
@@ -231,17 +231,55 @@ function waitForServer(maxAttempts = 30) {
   });
 }
 
+/** Servidor antigo (pré-pareamento) responde /health mas não tem /pair. */
+async function serverSupportsPairing() {
+  try {
+    const res = await fetch(`${apiBase()}/pair`, { signal: AbortSignal.timeout(2000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function killListenersOnPort(port) {
+  try {
+    if (process.platform === 'win32') {
+      execSync(
+        `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${port} ^| findstr LISTENING') do taskkill /F /PID %a`,
+        { stdio: 'ignore', shell: 'cmd.exe' }
+      );
+      return;
+    }
+    const pids = execSync(`lsof -tiTCP:${port} -sTCP:LISTEN`, { encoding: 'utf8' })
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    for (const pid of pids) {
+      try {
+        process.kill(Number(pid), 'SIGTERM');
+      } catch { /* already gone */ }
+    }
+  } catch {
+    /* nobody listening */
+  }
+}
+
 async function startLocalServer() {
   if (!getConfig('runLocalServer')) return;
   // Linux empacotado = sempre cliente remoto (conecta ao Mac)
   if (isLinux && appPaths.isPackaged()) return;
 
-  // Daemon externo / LaunchAgent — não acoplar ao ciclo de vida do Electron
+  // Daemon externo / LaunchAgent — reutilizar se já tiver API de pareamento
   try {
     await waitForServer(3);
-    serverStartedByUs = false;
-    console.log('[server] já online (daemon externo)');
-    return;
+    if (await serverSupportsPairing()) {
+      serverStartedByUs = false;
+      console.log('[server] já online (daemon externo)');
+      return;
+    }
+    console.warn('[server] online mas sem /api/pair — reiniciando processo na porta');
+    killListenersOnPort(getConfig('port'));
+    await new Promise((r) => setTimeout(r, 600));
   } catch { /* sobe um filho detached */ }
 
   const serverDist = appPaths.serverDistPath();
@@ -1435,6 +1473,15 @@ ipcMain.handle('test-hotkey', (_e, hotkey) => {
 });
 
 ipcMain.handle('paste-item', async (_e, item) => pasteItemIntoFocus(item));
+
+ipcMain.handle('discover-servers', async () => {
+  try {
+    const servers = await discoverServers(3500);
+    return { ok: true, servers };
+  } catch (err) {
+    return { ok: false, error: err.message, servers: [] };
+  }
+});
 
 ipcMain.handle('join-with-code', async (_e, raw) => {
   const parsed = parseJoinPayload(raw) || { code: String(raw || '').trim() };

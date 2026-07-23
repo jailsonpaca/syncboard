@@ -89,6 +89,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(toast = null)
     }
 
+    fun connectToServer(serverUrl: String) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(pairing = true, pairError = null)
+            try {
+                val url = serverUrl.trim().trimEnd('/')
+                sb.api.health(url)
+                sb.prefs.setServerUrl(url)
+                _state.value = _state.value.copy(pairing = false, toast = "Conectado a $url")
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    pairing = false,
+                    pairError = e.message ?: "Falha ao conectar",
+                )
+            }
+        }
+    }
+
     fun pairWithInput(raw: String) {
         viewModelScope.launch {
             _state.value = _state.value.copy(pairing = true, pairError = null)

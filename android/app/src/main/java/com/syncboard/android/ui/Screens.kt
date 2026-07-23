@@ -60,6 +60,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.syncboard.android.data.ClipItem
 import com.syncboard.android.data.ScreenshotSyncMode
+import com.syncboard.android.pair.UdpDiscovery
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SyncBoardRoot(
@@ -80,6 +83,7 @@ fun SyncBoardRoot(
             pairing = state.pairing,
             error = state.pairError,
             onPair = vm::pairWithInput,
+            onSelectServer = vm::connectToServer,
             onScanQr = onScanQr,
             snack = snack,
         )
@@ -107,10 +111,31 @@ private fun PairScreen(
     pairing: Boolean,
     error: String?,
     onPair: (String) -> Unit,
+    onSelectServer: (String) -> Unit,
     onScanQr: () -> Unit,
     snack: SnackbarHostState,
 ) {
     var code by remember { mutableStateOf("") }
+    var scanToken by remember { mutableIntStateOf(0) }
+    var discovering by remember { mutableStateOf(false) }
+    var lanServers by remember { mutableStateOf<List<UdpDiscovery.ServerInfo>>(emptyList()) }
+    var discoverError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(scanToken) {
+        discovering = true
+        discoverError = null
+        lanServers = withContext(Dispatchers.IO) {
+            runCatching { UdpDiscovery.discoverServers() }.getOrElse {
+                discoverError = it.message
+                emptyList()
+            }
+        }
+        if (lanServers.isEmpty() && discoverError == null) {
+            discoverError = "Nenhum SyncBoard encontrado na rede"
+        }
+        discovering = false
+    }
+
     Scaffold(snackbarHost = { SnackbarHost(snack) }) { pad ->
         Column(
             Modifier
@@ -128,10 +153,61 @@ private fun PairScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Digite o código do servidor na mesma Wi‑Fi",
+                "Escolha um servidor na rede ou digite o código",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Na rede", fontWeight = FontWeight.SemiBold)
+                TextButton(
+                    onClick = { scanToken += 1 },
+                    enabled = !discovering,
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Spacer(Modifier.size(4.dp))
+                    Text(if (discovering) "Buscando…" else "Buscar")
+                }
+            }
+
+            if (discovering && lanServers.isEmpty()) {
+                CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.height(8.dp))
+            }
+            if (!discoverError.isNullOrBlank() && lanServers.isEmpty()) {
+                Text(discoverError!!, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+            }
+            lanServers.forEach { server ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clickable(enabled = !pairing) { onSelectServer(server.serverUrl) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            server.hostname ?: server.serverUrl.removePrefix("http://"),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            buildString {
+                                append(server.serverUrl)
+                                if (!server.code.isNullOrBlank()) append(" · ${server.code}")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = code,
                 onValueChange = { code = it.uppercase().take(8) },

@@ -12,6 +12,16 @@ interface SyncboardDesktop {
   saveConfig?: (cfg: Record<string, unknown>) => Promise<unknown>;
   testHotkey?: (hotkey: string) => Promise<unknown>;
   joinWithCode?: (code: string) => Promise<{ ok?: boolean; serverUrl?: string; error?: string }>;
+  discoverServers?: () => Promise<{
+    ok?: boolean;
+    error?: string;
+    servers?: Array<{
+      serverUrl: string;
+      code?: string;
+      hostname?: string;
+      urls?: string[];
+    }>;
+  }>;
   checkUpdate?: () => Promise<unknown>;
   downloadUpdate?: () => Promise<unknown>;
   installUpdate?: () => Promise<unknown>;

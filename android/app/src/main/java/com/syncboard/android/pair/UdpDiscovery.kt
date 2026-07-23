@@ -16,6 +16,76 @@ object UdpDiscovery {
 
     data class Result(val serverUrl: String, val token: String? = null)
 
+    data class ServerInfo(
+        val serverUrl: String,
+        val code: String? = null,
+        val hostname: String? = null,
+    )
+
+    /** Lista servidores SyncBoard anunciando na LAN (multicast + beacon). */
+    suspend fun discoverServers(timeoutMs: Long = 3500): List<ServerInfo> = withContext(Dispatchers.IO) {
+        val found = linkedMapOf<String, ServerInfo>()
+        val group = InetAddress.getByName(MULTICAST)
+        MulticastSocket(null).use { socket ->
+            socket.reuseAddress = true
+            socket.soTimeout = 400
+            socket.bind(InetSocketAddress(PORT))
+            try {
+                val nif = NetworkInterface.getNetworkInterfaces()?.toList()
+                    ?.firstOrNull { it.isUp && !it.isLoopback && it.supportsMulticast() }
+                if (nif != null) socket.joinGroup(InetSocketAddress(group, PORT), nif)
+                else socket.joinGroup(group)
+            } catch (_: Exception) {
+                try {
+                    socket.joinGroup(group)
+                } catch (_: Exception) {
+                }
+            }
+
+            fun sendDiscover() {
+                val query = JSONObject()
+                    .put("type", "syncboard-discover")
+                    .put("v", 1)
+                    .toString()
+                    .toByteArray(Charsets.UTF_8)
+                socket.send(DatagramPacket(query, query.size, group, PORT))
+                try {
+                    val broadcast = InetAddress.getByName("255.255.255.255")
+                    socket.send(DatagramPacket(query, query.size, broadcast, PORT))
+                } catch (_: Exception) {
+                }
+            }
+
+            sendDiscover()
+            val deadline = System.currentTimeMillis() + timeoutMs
+            val buf = ByteArray(4096)
+            var secondPing = false
+            while (System.currentTimeMillis() < deadline) {
+                if (!secondPing && System.currentTimeMillis() > deadline - timeoutMs + 900) {
+                    sendDiscover()
+                    secondPing = true
+                }
+                try {
+                    val incoming = DatagramPacket(buf, buf.size)
+                    socket.receive(incoming)
+                    val text = String(incoming.data, 0, incoming.length, Charsets.UTF_8)
+                    val obj = JSONObject(text)
+                    if (obj.optString("type") != "syncboard-pair") continue
+                    val url = obj.optString("url").trimEnd('/')
+                    if (url.isBlank()) continue
+                    found[url] = ServerInfo(
+                        serverUrl = url,
+                        code = obj.optString("code").ifBlank { null }?.uppercase(),
+                        hostname = obj.optString("hostname").ifBlank { null },
+                    )
+                } catch (_: Exception) {
+                    /* timeout parcial */
+                }
+            }
+        }
+        found.values.toList().sortedBy { it.serverUrl }
+    }
+
     suspend fun discoverByCode(code: String, timeoutMs: Long = 5000): Result = withContext(Dispatchers.IO) {
         val normalized = code.trim().uppercase().replace(Regex("[^A-Z0-9]"), "")
         require(normalized.length >= 4) { "Código inválido" }

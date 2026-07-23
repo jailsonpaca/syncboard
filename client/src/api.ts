@@ -337,6 +337,7 @@ export type PairInfo = {
   token: string;
   qrPayload: string;
   joinUrl: string;
+  hostname?: string;
 };
 
 export type UpdateStatus = {
@@ -371,6 +372,60 @@ export async function fetchUpdateStatus(force = false): Promise<UpdateStatus> {
   const res = await fetch(`${apiBase()}/update?force=${force ? 'true' : 'false'}`);
   if (!res.ok) throw new Error('Falha ao checar update');
   return res.json();
+}
+
+export type DiscoveredServer = {
+  serverUrl: string;
+  code?: string;
+  hostname?: string;
+  urls?: string[];
+};
+
+/** Busca servidores SyncBoard na LAN (UDP no Electron; HTTP no browser). */
+export async function discoverLanServers(): Promise<DiscoveredServer[]> {
+  if (window.syncboard?.discoverServers) {
+    const result = await window.syncboard.discoverServers();
+    if (!result?.ok) throw new Error(result?.error || 'Falha na busca na rede');
+    return result.servers || [];
+  }
+
+  const hosts = guessLanHosts();
+  const found = new Map<string, DiscoveredServer>();
+  const batchSize = 32;
+
+  for (let i = 0; i < hosts.length; i += batchSize) {
+    const batch = hosts.slice(i, i + batchSize);
+    await Promise.all(
+      batch.map(async (host) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 350);
+        try {
+          const res = await fetch(`http://${host}/api/pair`, { signal: ctrl.signal });
+          if (!res.ok) return;
+          const data = await res.json();
+          const serverUrl = String(data.url || `http://${host}`).replace(/\/$/, '');
+          found.set(serverUrl, {
+            serverUrl,
+            code: data.code ? String(data.code).toUpperCase() : undefined,
+            hostname: data.hostname ? String(data.hostname) : undefined,
+            urls: Array.isArray(data.urls)
+              ? data.urls.map((u: string) => String(u).replace(/\/$/, ''))
+              : undefined,
+          });
+        } catch {
+          /* offline host */
+        } finally {
+          clearTimeout(t);
+        }
+      })
+    );
+    // Se já achou algo na varredura leve, pode parar cedo após o 1º bloco (~gateway/vizinhos)
+    if (i === 0 && found.size > 0 && hosts.length > 40) {
+      // continua só mais um pouco para pegar outros hosts
+    }
+  }
+
+  return [...found.values()].sort((a, b) => a.serverUrl.localeCompare(b.serverUrl));
 }
 
 function guessLanHosts(port = 8787): string[] {
