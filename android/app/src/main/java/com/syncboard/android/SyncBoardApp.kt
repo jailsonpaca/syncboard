@@ -9,6 +9,7 @@ import com.syncboard.android.sync.MediaStoreWatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
 class SyncBoardApp : Application() {
@@ -34,6 +35,8 @@ class SyncBoardApp : Application() {
         ws = WsClient(appScope, api.okHttp(), json) { prefs.getDeviceName() }
         clipboardMonitor = ClipboardMonitor(this, prefs, api)
         mediaWatcher = MediaStoreWatcher(this, prefs, api, appScope)
+        // Persiste nome estável na 1ª execução (evita UUID novo a cada sync)
+        appScope.launch(Dispatchers.IO) { prefs.ensureDeviceName() }
     }
 
     companion object {

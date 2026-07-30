@@ -19,6 +19,7 @@ import {
   itemKindLabel,
   discoverLanServers,
   fetchDevices,
+  dedupeDevices,
   joinWithCodeWeb,
   regeneratePairCode,
   setDeviceName,
@@ -378,9 +379,9 @@ export default function App() {
         if (names.size) {
           setDevices((prev) => {
             const online = new Set(prev.filter((d) => d.online).map((d) => d.name));
-            return [...names]
-              .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-              .map((name) => ({ name, online: online.has(name) }));
+            return dedupeDevices(
+              [...names].map((name) => ({ name, online: online.has(name) }))
+            );
           });
         }
         setLoading(false);
@@ -390,12 +391,12 @@ export default function App() {
       },
       onCreated: (item) => {
         if (item.deviceName) {
-          setDevices((prev) => {
-            if (prev.some((d) => d.name === item.deviceName)) return prev;
-            return [...prev, { name: item.deviceName!, online: false }].sort((a, b) =>
-              a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-            );
-          });
+          setDevices((prev) =>
+            dedupeDevices([
+              ...prev,
+              { name: item.deviceName!, online: false },
+            ])
+          );
         }
         if (!matchesFilter(item, typeFilter, debouncedSearch, deviceFilter)) return;
         if (item.pinned) {

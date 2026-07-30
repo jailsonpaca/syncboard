@@ -452,6 +452,13 @@ function rememberHash(hash) {
   }
 }
 
+/** Libera hash reservado quando o upload falha — permite retry no próximo poll. */
+function forgetHash(hash) {
+  if (!hash) return;
+  recentClipHashes.delete(hash);
+  if (lastHash === hash) lastHash = '';
+}
+
 function hashClip(clip) {
   if (clip.type === 'text') {
     return crypto.createHash('sha256').update(`text:${clip.data}`).digest('hex');
@@ -637,22 +644,28 @@ async function pollClipboard() {
     // Reserva o hash ANTES do upload (upload lento ≠ novo item)
     rememberHash(hash);
 
-    // Online (remoto ou hub local): envia pela API
-    if (connected) {
-      try {
-        const ok = await pushClip(clip);
-        if (ok) {
-          await refreshItems();
-          updateTrayMenu();
-        }
+    // Tenta HTTP mesmo se o WS caiu — sync de clipboard não depende só do WebSocket
+    try {
+      const ok = await pushClip(clip);
+      if (ok) {
+        await refreshItems();
+        updateTrayMenu();
         return;
-      } catch {
-        /* cai no modo local abaixo */
       }
+      // HTTP respondeu erro — libera para retry no próximo poll
+      forgetHash(hash);
+      console.warn('[sync] upload falhou — retry no próximo poll');
+      return;
+    } catch (err) {
+      forgetHash(hash);
+      console.warn('[sync] upload erro:', err?.message || err);
+      // Sem servidor: cai no modo local abaixo
     }
 
     // Offline: histórico local no próprio cliente (clipboard entre si + Fixo em cache)
     try {
+      // Re-reserva: item ficou só no cache local
+      rememberHash(hash);
       const item = pushClipLocal(clip);
       if (!item) return;
       historyItems = [item, ...historyItems.filter((i) => i.id !== item.id)].slice(0, 100);
@@ -989,27 +1002,36 @@ async function bumpItemToTop(item) {
   return item;
 }
 
+/** Tenta colar com retries — o app anterior precisa recuperar o foco após esconder o popup. */
+async function simulatePasteWithRetry(attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    // Espera o foco voltar ao app anterior (blur/hide do Electron é assíncrono)
+    await sleep(i === 0 ? 160 : 220);
+    const pasted = await simulatePaste();
+    if (pasted) return true;
+  }
+  return false;
+}
+
 /** Copia e cola no app que estava focado antes do popup (texto/imagem/arquivo). */
 async function pasteItemIntoFocus(item) {
+  // Esconde a UI cedo para o app anterior recuperar o foco enquanto baixamos/copiamos
+  if (compactWindow && !compactWindow.isDestroyed() && compactWindow.isVisible()) {
+    compactWindow.hide();
+  }
+  if (isMac) app.hide();
+
   const target = await bumpItemToTop(item);
   const copied = await copyItem(target);
   if (!copied?.ok) return copied;
 
   try {
-    if (compactWindow && !compactWindow.isDestroyed() && compactWindow.isVisible()) {
-      compactWindow.hide();
-    }
-    if (isMac) app.hide();
-
-    await sleep(80);
-
-    // Arquivo no Linux: Ctrl+V é instável — SEMPRE salva e abre a pasta com o arquivo
+    // Arquivo: Ctrl+V é instável — SEMPRE salva e abre a pasta com o arquivo
     if (target.type === 'file' && copied.localPath) {
       const revealed = revealFileInFolder(copied.localPath);
       // tenta colar na pasta focada também (bônus)
       if (copied.wroteClipboard) {
-        await sleep(100);
-        await simulatePaste();
+        await simulatePasteWithRetry(2);
       }
       notifyUser(
         'SyncBoard',
@@ -1026,7 +1048,7 @@ async function pasteItemIntoFocus(item) {
       };
     }
 
-    const pasted = await simulatePaste();
+    const pasted = await simulatePasteWithRetry(3);
 
     return { ok: true, pasted, kind: target.type };
   } catch (err) {

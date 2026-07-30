@@ -11,6 +11,7 @@ import com.syncboard.android.SyncBoardApp
 import com.syncboard.android.data.ClipItem
 import com.syncboard.android.data.DeviceInfo
 import com.syncboard.android.data.ScreenshotSyncMode
+import com.syncboard.android.data.dedupeDevices
 import com.syncboard.android.pair.UdpDiscovery
 import com.syncboard.android.sync.PendingScreenshot
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -164,13 +165,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val h = sb.api.fetchItems(false, device = device)
                 val p = sb.api.fetchItems(true, device = device)
                 val devices = runCatching { sb.api.fetchDevices() }.getOrDefault(emptyList())
+                val fallback = (h.items + p.items).mapNotNull { it.deviceName }.distinct()
+                    .map { DeviceInfo(it, online = false) }
                 _state.value = _state.value.copy(
                     history = h.items,
                     pinned = p.items,
-                    devices = devices.ifEmpty {
-                        (h.items + p.items).mapNotNull { it.deviceName }.distinct()
-                            .map { DeviceInfo(it, online = false) }
-                    },
+                    devices = dedupeDevices(devices.ifEmpty { fallback }),
                     loading = false,
                     serverUrl = url,
                 )

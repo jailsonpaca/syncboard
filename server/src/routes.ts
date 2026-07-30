@@ -9,6 +9,7 @@ import type { Hub } from './hub.js';
 import type { ItemType } from './types.js';
 import type { PairService } from './pair.js';
 import { getLocalVersion, getUpdateStatus } from './update.js';
+import { dedupeDevices } from './devices.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -79,9 +80,9 @@ export function createRouter(store: ClipStore, hub: Hub, pair?: PairService): ex
     const known = store.listDeviceNames();
     const online = new Set(hub.onlineDeviceNames());
     const names = new Set([...known, ...online]);
-    const devices = [...names]
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-      .map((name) => ({ name, online: online.has(name) }));
+    const devices = dedupeDevices(
+      [...names].map((name) => ({ name, online: online.has(name) }))
+    );
     res.json({ devices });
   });
 

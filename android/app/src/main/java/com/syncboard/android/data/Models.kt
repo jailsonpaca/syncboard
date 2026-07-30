@@ -32,6 +32,48 @@ data class DeviceInfo(
     val online: Boolean = false,
 )
 
+/** Deduplica nomes iguais e variantes com sufixo aleatório (ex.: Pixel-a1b2). */
+fun dedupeDevices(devices: List<DeviceInfo>): List<DeviceInfo> {
+    fun baseKey(name: String): String {
+        val trimmed = name.trim()
+        val m = Regex("""^(.*)-([a-z0-9]{4})$""", RegexOption.IGNORE_CASE).matchEntire(trimmed)
+        return if (m != null) m.groupValues[1].lowercase() else trimmed.lowercase()
+    }
+
+    val byExact = linkedMapOf<String, DeviceInfo>()
+    for (d in devices) {
+        val name = d.name.trim()
+        if (name.isEmpty()) continue
+        val key = name.lowercase()
+        val prev = byExact[key]
+        if (prev == null || (d.online && !prev.online)) {
+            byExact[key] = DeviceInfo(name, d.online)
+        } else if (d.online) {
+            byExact[key] = prev.copy(online = true)
+        }
+    }
+
+    val groups = linkedMapOf<String, MutableList<DeviceInfo>>()
+    for (d in byExact.values) {
+        groups.getOrPut(baseKey(d.name)) { mutableListOf() }.add(d)
+    }
+
+    val result = mutableListOf<DeviceInfo>()
+    for (group in groups.values) {
+        if (group.size == 1) {
+            result.add(group[0])
+            continue
+        }
+        val online = group.filter { it.online }
+        if (online.isNotEmpty()) {
+            result.addAll(online)
+        } else {
+            result.add(group.minWith(compareBy({ it.name.length }, { it.name })))
+        }
+    }
+    return result.sortedBy { it.name.lowercase() }
+}
+
 @Serializable
 data class DevicesResponse(
     val devices: List<DeviceInfo> = emptyList(),

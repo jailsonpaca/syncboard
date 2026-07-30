@@ -24,7 +24,8 @@ class AppPrefs(private val context: Context) {
 
     val serverUrl: Flow<String?> = context.dataStore.data.map { it[serverUrlKey] }
     val deviceName: Flow<String> = context.dataStore.data.map {
-        it[deviceNameKey] ?: defaultDeviceName()
+        // Nunca gera UUID aqui — senão cada emissão vira um device novo na lista
+        it[deviceNameKey] ?: "Android"
     }
     val clipboardSync: Flow<Boolean> = context.dataStore.data.map { it[clipboardSyncKey] ?: true }
     val screenshotMode: Flow<ScreenshotSyncMode> = context.dataStore.data.map {
@@ -32,9 +33,20 @@ class AppPrefs(private val context: Context) {
     }
 
     suspend fun getServerUrl(): String? = serverUrl.first()
-    suspend fun getDeviceName(): String = deviceName.first()
+
+    /** Nome estável: gera e persiste uma vez. */
+    suspend fun getDeviceName(): String = ensureDeviceName()
+
     suspend fun isClipboardSync(): Boolean = clipboardSync.first()
     suspend fun getScreenshotMode(): ScreenshotSyncMode = screenshotMode.first()
+
+    suspend fun ensureDeviceName(): String {
+        val existing = context.dataStore.data.map { it[deviceNameKey] }.first()
+        if (!existing.isNullOrBlank()) return existing
+        val generated = defaultDeviceName()
+        context.dataStore.edit { it[deviceNameKey] = generated }
+        return generated
+    }
 
     suspend fun setServerUrl(url: String?) {
         context.dataStore.edit { prefs ->
@@ -44,7 +56,10 @@ class AppPrefs(private val context: Context) {
     }
 
     suspend fun setDeviceName(name: String) {
-        context.dataStore.edit { it[deviceNameKey] = name.trim().ifBlank { defaultDeviceName() } }
+        val trimmed = name.trim()
+        context.dataStore.edit {
+            it[deviceNameKey] = trimmed.ifBlank { defaultDeviceName() }
+        }
     }
 
     suspend fun setClipboardSync(enabled: Boolean) {

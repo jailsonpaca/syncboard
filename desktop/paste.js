@@ -19,7 +19,10 @@ async function commandExists(bin) {
 async function simulatePaste() {
   if (process.platform === 'darwin') {
     try {
+      // delay interno: o app anterior precisa estar frontmost após app.hide()
       await execFileAsync('osascript', [
+        '-e',
+        'delay 0.12',
         '-e',
         'tell application "System Events" to keystroke "v" using command down',
       ]);
