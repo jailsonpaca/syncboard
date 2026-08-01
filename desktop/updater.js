@@ -32,6 +32,26 @@ function normalizeNotes(raw) {
   return String(raw);
 }
 
+function parseVersion(v) {
+  return String(v || '0')
+    .replace(/^v/, '')
+    .split('.')
+    .map((n) => parseInt(String(n).replace(/\D.*/, ''), 10) || 0);
+}
+
+function isNewer(remote, local) {
+  const a = parseVersion(remote);
+  const b = parseVersion(local);
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
 /**
  * @param {{
  *   getAutoCheck: () => boolean,
@@ -84,8 +104,13 @@ function setupUpdater(hooks) {
     hooks.onError?.(err);
   });
 
-  async function check() {
-    if (!hooks.getAutoCheck()) return null;
+  /**
+   * @param {{ force?: boolean }} [opts]
+   * force=true ignora a preferência autoUpdate (checagem manual / botão da UI).
+   */
+  async function check(opts = {}) {
+    const force = Boolean(opts.force);
+    if (!force && !hooks.getAutoCheck()) return null;
     try {
       const result = await autoUpdater.checkForUpdates();
       const info = result?.updateInfo || null;
@@ -95,6 +120,7 @@ function setupUpdater(hooks) {
       return info;
     } catch (err) {
       console.warn('[updater] check:', err.message);
+      if (force) throw err;
       return null;
     }
   }
@@ -136,4 +162,11 @@ async function fetchGithubReleaseNotes(version) {
   }
 }
 
-module.exports = { setupUpdater, loadReleaseConfig, fetchGithubReleaseNotes, normalizeNotes };
+module.exports = {
+  setupUpdater,
+  loadReleaseConfig,
+  fetchGithubReleaseNotes,
+  normalizeNotes,
+  parseVersion,
+  isNewer,
+};

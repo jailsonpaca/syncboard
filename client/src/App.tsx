@@ -44,6 +44,39 @@ const PAGE_SIZE = 20;
 const isCompactView = new URLSearchParams(window.location.search).get('view') === 'compact';
 const CONTEXT_MENU_WIDTH = 168;
 const CONTEXT_MENU_HEIGHT = 132;
+const DEFAULT_DOWNLOAD_PAGE = 'https://syncboard.jpinnovation.com.br';
+
+function pickPlatformDownloadUrl(status: UpdateStatus | null | undefined): string {
+  const assets = status?.assets;
+  const ua = navigator.userAgent.toLowerCase();
+  let asset: string | null | undefined;
+  if (/mac|iphone|ipad|darwin/.test(ua)) {
+    asset = assets?.macDmg || assets?.macZip;
+  } else if (/windows|win32|win64/.test(ua)) {
+    asset = assets?.winSetup || assets?.winZip;
+  } else if (/linux|android/.test(ua)) {
+    asset = assets?.linuxAppImage || assets?.linuxTar;
+  }
+  return (
+    asset ||
+    status?.downloadPage ||
+    assets?.macDmg ||
+    assets?.winSetup ||
+    assets?.linuxAppImage ||
+    DEFAULT_DOWNLOAD_PAGE
+  );
+}
+
+async function openDownloadUrl(url: string): Promise<boolean> {
+  const target = String(url || '').trim();
+  if (!target || target === '#') return false;
+  if (window.syncboard?.openExternal) {
+    const res = await window.syncboard.openExternal(target);
+    return Boolean(res?.ok);
+  }
+  const opened = window.open(target, '_blank', 'noopener,noreferrer');
+  return Boolean(opened);
+}
 
 const FILTERS: { id: TypeFilter; label: string }[] = [
   { id: 'all', label: 'Todos' },
@@ -617,22 +650,65 @@ export default function App() {
   const canAutoUpdate = Boolean(window.syncboard?.downloadUpdate);
   const updatePhase = desktopUpdate?.phase || 'idle';
   const updateProgress = desktopUpdate?.progress ?? 0;
+  const manualDownloadUrl = pickPlatformDownloadUrl(updateStatus);
+
+  const openManualDownload = async (url?: string | null) => {
+    const target = url || manualDownloadUrl;
+    showToast('Abrindo download…');
+    const ok = await openDownloadUrl(target);
+    if (!ok) showToast('Não foi possível abrir o link de download');
+  };
 
   const startAutoUpdate = async () => {
-    if (!window.syncboard?.downloadUpdate) return;
+    // Sem Electron API → download manual (site / asset)
+    if (!window.syncboard?.downloadUpdate) {
+      await openManualDownload();
+      return;
+    }
+
     setUpdateBusy(true);
     try {
-      if (!desktopUpdate && window.syncboard.checkUpdate) {
-        await window.syncboard.checkUpdate();
+      if (desktopUpdate?.downloaded && window.syncboard.installUpdate) {
+        showToast('Instalando e reiniciando…');
+        const installed = await window.syncboard.installUpdate();
+        if (installed?.ok === false) {
+          showToast(installed.error || 'Falha ao instalar');
+          await openManualDownload(installed.fallbackUrl);
+          setUpdateBusy(false);
+        }
+        return;
       }
+
+      showToast(desktopUpdate ? 'Baixando atualização…' : 'Verificando atualização…');
+
+      if (!desktopUpdate && window.syncboard.checkUpdate) {
+        const checked = await window.syncboard.checkUpdate();
+        if (!checked?.updateAvailable) {
+          showToast('Auto-update indisponível — abrindo download manual');
+          await openManualDownload(checked?.fallbackUrl || manualDownloadUrl);
+          setUpdateBusy(false);
+          return;
+        }
+        setDesktopUpdate({
+          version: checked.version || updateStatus?.latest || '',
+          downloaded: Boolean(checked.downloaded),
+          releaseNotes: checked.releaseNotes || '',
+          phase: 'idle',
+          progress: 0,
+        });
+      }
+
       const result = await window.syncboard.downloadUpdate();
       if (result && result.ok === false) {
         showToast(result.error || 'Falha ao atualizar');
+        await openManualDownload(result.fallbackUrl || manualDownloadUrl);
         setUpdateBusy(false);
+        return;
       }
       // sucesso: o app reinicia via quitAndInstall
     } catch (err) {
       showToast((err as Error).message || 'Falha ao atualizar');
+      await openManualDownload();
       setUpdateBusy(false);
     }
   };
@@ -700,29 +776,42 @@ export default function App() {
                 O que há de novo
               </button>
               {canAutoUpdate ? (
+                <>
+                  <button
+                    className="btn sm primary"
+                    type="button"
+                    disabled={updateBusy || updatePhase === 'installing'}
+                    onClick={() => void startAutoUpdate()}
+                  >
+                    {updateBusy && updatePhase === 'idle'
+                      ? 'Preparando…'
+                      : updatePhase === 'downloading'
+                        ? `Baixando ${Math.round(updateProgress)}%`
+                        : updatePhase === 'installing'
+                          ? 'Instalando…'
+                          : desktopUpdate?.downloaded
+                            ? 'Instalar e reiniciar'
+                            : 'Baixar e instalar'}
+                  </button>
+                  <button
+                    className="btn sm"
+                    type="button"
+                    disabled={updateBusy}
+                    onClick={() => void openManualDownload()}
+                    title="Abrir página/arquivo de download no navegador"
+                  >
+                    Baixar manualmente
+                  </button>
+                </>
+              ) : (
                 <button
                   className="btn sm primary"
                   type="button"
-                  disabled={updateBusy || updatePhase === 'installing'}
-                  onClick={() => void startAutoUpdate()}
-                >
-                  {updatePhase === 'downloading'
-                    ? `Baixando ${updateProgress}%`
-                    : updatePhase === 'installing'
-                      ? 'Instalando…'
-                      : desktopUpdate?.downloaded
-                        ? 'Instalar e reiniciar'
-                        : 'Baixar e instalar'}
-                </button>
-              ) : (
-                <a
-                  className="btn sm primary"
-                  href={updateStatus?.downloadPage || updateStatus?.assets?.macDmg || '#'}
-                  target="_blank"
-                  rel="noreferrer"
+                  disabled={updateBusy}
+                  onClick={() => void openManualDownload()}
                 >
                   Baixar
-                </a>
+                </button>
               )}
             </div>
           </div>
@@ -753,19 +842,22 @@ export default function App() {
             <pre className="whats-new-body">{whatsNewNotes}</pre>
             <div className="modal-footer">
               <button className="btn" type="button" onClick={() => setShowWhatsNew(false)}>Fechar</button>
-              {canAutoUpdate && (
-                <button
-                  className="btn primary"
-                  type="button"
-                  disabled={updateBusy}
-                  onClick={() => {
-                    setShowWhatsNew(false);
-                    void startAutoUpdate();
-                  }}
-                >
-                  Baixar e instalar
-                </button>
-              )}
+              <button
+                className="btn primary"
+                type="button"
+                disabled={updateBusy}
+                onClick={() => {
+                  setShowWhatsNew(false);
+                  if (canAutoUpdate) void startAutoUpdate();
+                  else void openManualDownload();
+                }}
+              >
+                {canAutoUpdate
+                  ? desktopUpdate?.downloaded
+                    ? 'Instalar e reiniciar'
+                    : 'Baixar e instalar'
+                  : 'Baixar'}
+              </button>
             </div>
           </div>
         </div>

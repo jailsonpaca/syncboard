@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('syncboard', {
   downloadUpdate: () => ipcRenderer.invoke('download-update'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
   getUpdateNotes: () => ipcRenderer.invoke('get-update-notes'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
   onUpdateStatus: (cb) => {
     const handler = (_e, data) => cb(data);
     ipcRenderer.on('update-status', handler);

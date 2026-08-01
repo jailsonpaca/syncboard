@@ -1,6 +1,6 @@
 {
   "name": "syncboard-daemon",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "scripts": {
     "start": "node src/index.js"

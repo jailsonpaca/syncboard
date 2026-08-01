@@ -27,14 +27,17 @@ interface SyncboardDesktop {
     updateAvailable?: boolean;
     version?: string | null;
     releaseNotes?: string;
+    downloaded?: boolean;
+    fallbackUrl?: string;
   }>;
-  downloadUpdate?: () => Promise<{ ok?: boolean; error?: string }>;
-  installUpdate?: () => Promise<{ ok?: boolean }>;
+  downloadUpdate?: () => Promise<{ ok?: boolean; error?: string; fallbackUrl?: string }>;
+  installUpdate?: () => Promise<{ ok?: boolean; error?: string; fallbackUrl?: string }>;
   getUpdateNotes?: () => Promise<{
     ok?: boolean;
     version?: string | null;
     releaseNotes?: string;
   }>;
+  openExternal?: (url: string) => Promise<{ ok?: boolean; error?: string; url?: string }>;
   onUpdateStatus?: (cb: (data: {
     updateAvailable?: boolean;
     version?: string | null;

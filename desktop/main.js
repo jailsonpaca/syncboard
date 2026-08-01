@@ -25,7 +25,12 @@ const offlineCache = require('./offline-cache');
 const { createOfflineHub } = require('./offline-hub');
 const { simulatePaste, sleep } = require('./paste');
 const { discoverByCode, discoverServers, parseJoinPayload } = require('./pair-discover');
-const { setupUpdater, loadReleaseConfig, fetchGithubReleaseNotes } = require('./updater');
+const {
+  setupUpdater,
+  loadReleaseConfig,
+  fetchGithubReleaseNotes,
+  isNewer,
+} = require('./updater');
 const {
   readClipboardFilePaths,
   writeClipboardFilePaths,
@@ -1133,6 +1138,7 @@ function ensureCompactWindow() {
     }
   });
 
+  attachExternalLinkHandler(compactWindow);
   compactWindow.loadURL(getAppUrl(true));
   return compactWindow;
 }
@@ -1166,6 +1172,7 @@ function openMainWindow() {
     mainWindow?.focus();
   });
 
+  attachExternalLinkHandler(mainWindow);
   mainWindow.loadURL(url);
 
   mainWindow.on('closed', () => {
@@ -1230,6 +1237,7 @@ function openPrefsWindow() {
     },
   });
 
+  attachExternalLinkHandler(prefsWindow);
   prefsWindow.loadFile(path.join(__dirname, 'prefs.html'));
   prefsWindow.on('closed', () => { prefsWindow = null; });
 }
@@ -1391,10 +1399,90 @@ async function ensureReleaseNotes() {
   return notes || '';
 }
 
-async function downloadAndNotifyUpdate() {
-  if (!updaterApi || !updateInfo || updateBusy) {
-    return { ok: false, error: 'Nenhuma atualização disponível' };
+function getManualDownloadUrl() {
+  const cfg = loadReleaseConfig();
+  return cfg.downloadUrl || `https://github.com/${cfg.owner}/${cfg.repo}/releases/latest`;
+}
+
+async function openExternalUrl(url) {
+  const target = String(url || '').trim();
+  if (!/^https?:\/\//i.test(target)) {
+    return { ok: false, error: 'URL inválida' };
   }
+  await shell.openExternal(target);
+  return { ok: true, url: target };
+}
+
+function attachExternalLinkHandler(win) {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void openExternalUrl(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    const current = win.webContents.getURL();
+    if (url !== current && /^https?:\/\//i.test(url)) {
+      // Permite navegar no app local/http do SyncBoard; externos abrem no browser
+      try {
+        const next = new URL(url);
+        const cur = new URL(current);
+        if (next.origin !== cur.origin) {
+          event.preventDefault();
+          void openExternalUrl(url);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+}
+
+async function downloadAndNotifyUpdate() {
+  if (updateBusy) {
+    return { ok: false, error: 'Atualização já em andamento', fallbackUrl: getManualDownloadUrl() };
+  }
+  if (!updaterApi) {
+    return { ok: false, error: 'Atualizador indisponível', fallbackUrl: getManualDownloadUrl() };
+  }
+  if (!updateInfo) {
+    return {
+      ok: false,
+      error: 'Nenhuma atualização pronta no auto-updater',
+      fallbackUrl: getManualDownloadUrl(),
+    };
+  }
+
+  // Já baixou → só instala
+  if (updateInfo.downloaded) {
+    updateBusy = true;
+    try {
+      updateInfo = { ...updateInfo, phase: 'installing', progress: 100, error: null };
+      broadcastUpdateToWindows();
+      notifyUser('SyncBoard', `Instalando versão ${updateInfo.version}…`);
+      for (const step of [30, 60, 100]) {
+        updateInfo = { ...updateInfo, phase: 'installing', progress: step };
+        broadcastUpdateToWindows();
+        await new Promise((r) => setTimeout(r, 160));
+      }
+      updaterApi.install();
+      return { ok: true };
+    } catch (err) {
+      updateInfo = { ...updateInfo, phase: 'error', error: err.message, progress: 0 };
+      broadcastUpdateToWindows();
+      return { ok: false, error: err.message, fallbackUrl: getManualDownloadUrl() };
+    } finally {
+      updateBusy = false;
+    }
+  }
+
+  if (!app.isPackaged) {
+    return {
+      ok: false,
+      error: 'Auto-update só funciona no app instalado. Abrindo página de download…',
+      fallbackUrl: getManualDownloadUrl(),
+    };
+  }
+
   updateBusy = true;
   try {
     updateInfo = {
@@ -1435,23 +1523,35 @@ async function downloadAndNotifyUpdate() {
       progress: 0,
     };
     broadcastUpdateToWindows();
-    return { ok: false, error: err.message };
+    return { ok: false, error: err.message, fallbackUrl: getManualDownloadUrl() };
   } finally {
     updateBusy = false;
   }
 }
 
-async function checkForAppUpdate(manual = false) {
+/**
+ * @param {boolean} manual
+ * @param {{ notify?: boolean }} [opts] notify=false evita diálogos (chamadas da UI).
+ */
+async function checkForAppUpdate(manual = false, opts = {}) {
+  const notify = opts.notify !== false;
   if (!updaterApi) return null;
   if (!manual && !getConfig('autoUpdate')) return null;
   try {
-    const info = await updaterApi.check();
-    if (!info && manual) {
-      notifyUser('SyncBoard', 'Você já está na versão mais recente.');
+    const info = await updaterApi.check({ force: manual });
+    if (!info) {
+      if (manual && notify) notifyUser('SyncBoard', 'Você já está na versão mais recente.');
+      return null;
+    }
+    const remote = info.version;
+    const local = app.getVersion();
+    if (!remote || !isNewer(remote, local)) {
+      if (manual && notify) notifyUser('SyncBoard', 'Você já está na versão mais recente.');
+      return null;
     }
     return info;
   } catch (err) {
-    if (manual) {
+    if (manual && notify) {
       dialog.showErrorBox('SyncBoard', `Não foi possível verificar updates: ${err.message}`);
     }
     return null;
@@ -1651,17 +1751,19 @@ ipcMain.handle('join-with-code', async (_e, raw) => {
 });
 
 ipcMain.handle('check-update', async () => {
-  const info = await checkForAppUpdate(true);
-  if (info && !updateInfo) {
+  // Silencioso: feedback fica na UI (toast / fallback de download)
+  const info = await checkForAppUpdate(true, { notify: false });
+  if (info) {
     updateInfo = {
       version: info.version,
-      downloaded: false,
-      releaseNotes: info.releaseNotes || '',
-      phase: 'idle',
-      progress: 0,
+      downloaded: Boolean(updateInfo?.downloaded && updateInfo?.version === info.version),
+      releaseNotes: info.releaseNotes || updateInfo?.releaseNotes || '',
+      phase: updateInfo?.downloaded && updateInfo?.version === info.version ? 'ready' : 'idle',
+      progress: updateInfo?.downloaded && updateInfo?.version === info.version ? 100 : 0,
       error: null,
     };
     broadcastUpdateToWindows();
+    updateTrayMenu();
   }
   await ensureReleaseNotes();
   return {
@@ -1669,13 +1771,23 @@ ipcMain.handle('check-update', async () => {
     updateAvailable: Boolean(updateInfo),
     version: updateInfo?.version || null,
     releaseNotes: updateInfo?.releaseNotes || '',
+    downloaded: Boolean(updateInfo?.downloaded),
+    fallbackUrl: getManualDownloadUrl(),
   };
 });
 ipcMain.handle('download-update', async () => downloadAndNotifyUpdate());
 ipcMain.handle('install-update', () => {
-  updaterApi?.install();
-  return { ok: true };
+  if (!updaterApi || !updateInfo?.downloaded) {
+    return { ok: false, error: 'Nada para instalar', fallbackUrl: getManualDownloadUrl() };
+  }
+  try {
+    updaterApi.install();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message, fallbackUrl: getManualDownloadUrl() };
+  }
 });
+ipcMain.handle('open-external', async (_e, url) => openExternalUrl(url));
 ipcMain.handle('get-update-notes', async () => {
   const notes = await ensureReleaseNotes();
   return {
