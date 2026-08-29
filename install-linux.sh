@@ -45,11 +45,18 @@ if command -v apt-get >/dev/null 2>&1; then
     libxkbcommon0 libpango-1.0-0 libcairo2 libx11-xcb1 libxcb-dri3-0 \
     libayatana-appindicator3-1 libappindicator3-1 \
     libasound2t64 libasound2 libasound2-dev \
-    xdg-utils fonts-liberation xdotool wtype xclip python3-gi gir1.2-gtk-3.0
+    xdg-utils fonts-liberation xdotool wtype xclip wl-clipboard python3-gi gir1.2-gtk-3.0
   do
     apt-cache show "$p" >/dev/null 2>&1 && \
       sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$p" >/dev/null 2>&1 || true
   done
+fi
+
+# Clipboard: no Wayland o Electron sozinho não lê cópias de outros apps
+if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
+  if ! command -v wl-paste >/dev/null 2>&1; then
+    echo "AVISO: instale wl-clipboard para sync Linux→Mac (sudo apt install wl-clipboard)"
+  fi
 fi
 
 echo "→ Baixando app..."
@@ -104,12 +111,9 @@ if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
 fi
 
 # Flags de plataforma
-EXTRA=(--no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage)
-if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
-  EXTRA+=(--ozone-platform=wayland --enable-features=UseOzonePlatform)
-else
-  EXTRA+=(--ozone-platform=x11)
-fi
+# Preferir X11 (XWayland) no Wayland: clipboard do Electron fica legível entre apps.
+# O app também usa wl-paste/xclip como fallback nativo.
+EXTRA=(--no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage --ozone-platform=x11)
 
 cat > "$BIN" << 'WRAP'
 #!/usr/bin/env bash
@@ -127,12 +131,8 @@ exec "$APP_DIR/syncboard" --no-sandbox --disable-gpu-sandbox --disable-dev-shm-u
 WRAP
 chmod +x "$BIN"
 
-# Injeta ozone no wrapper conforme sessão
-if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
-  sed -i 's|--disable-dev-shm-usage|--disable-dev-shm-usage --ozone-platform=wayland --enable-features=UseOzonePlatform|' "$BIN"
-else
-  sed -i 's|--disable-dev-shm-usage|--disable-dev-shm-usage --ozone-platform=x11|' "$BIN"
-fi
+# Injeta ozone X11 no wrapper (clipboard confiável entre apps)
+sed -i 's|--disable-dev-shm-usage|--disable-dev-shm-usage --ozone-platform=x11|' "$BIN"
 
 cat > "$DESKTOP_DIR/syncboard.desktop" << EOF
 [Desktop Entry]

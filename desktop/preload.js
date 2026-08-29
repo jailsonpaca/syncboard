@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('syncboard', {
   testHotkey: (hotkey) => ipcRenderer.invoke('test-hotkey', hotkey),
   /** Copia o item e cola no app que estava focado (atalho / popup). */
   pasteItem: (item) => ipcRenderer.invoke('paste-item', item),
+  /** Aplica item remoto na clipboard do SO (backup do WS do main). */
+  applyRemoteItem: (item) => ipcRenderer.invoke('apply-remote-item', item),
   joinWithCode: (code) => ipcRenderer.invoke('join-with-code', code),
   discoverServers: () => ipcRenderer.invoke('discover-servers'),
   checkUpdate: () => ipcRenderer.invoke('check-update'),

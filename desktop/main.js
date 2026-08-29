@@ -34,6 +34,7 @@ const {
 const {
   readClipboardFilePaths,
   writeClipboardFilePaths,
+  readLinuxClipboardNative,
   mimeFromPath,
   resolveNamedMediaFile,
   copyToPublicInbox,
@@ -47,7 +48,7 @@ const OFFLINE_PORT = 8790;
 const ROOT = appPaths.ROOT;
 const store = new Store({
   defaults: {
-    serverUrl: 'http://localhost:8787',
+    serverUrl: 'http://127.0.0.1:8787',
     runLocalServer: true,
     deviceName: os.hostname(),
     autoSync: true,
@@ -96,8 +97,11 @@ let serverStartedByUs = false;
 let ws = null;
 let wsReconnectTimer = null;
 let pollTimer = null;
+let remotePullTimer = null;
 let remoteProbeTimer = null;
 let lastHash = '';
+/** Último item remoto aplicado (fallback HTTP se o WS falhar). */
+let lastPulledRemoteId = '';
 /** Hashes recentes (evita reupload da mesma imagem no Mac). */
 const recentClipHashes = new Set();
 const RECENT_HASH_LIMIT = 40;
@@ -177,6 +181,16 @@ function getConfig(key) {
 
 function setConfig(key, value) {
   store.set(key, value);
+}
+
+function debugLog(msg) {
+  try {
+    const line = `[${new Date().toISOString()}] ${msg}\n`;
+    fs.appendFileSync(path.join(app.getPath('userData'), 'sync-debug.log'), line);
+  } catch {
+    /* ok */
+  }
+  console.log(msg);
 }
 
 function apiBase() {
@@ -396,6 +410,31 @@ function readClipboardImage() {
 }
 
 function readLocalClipboard() {
+  // Linux/Wayland: Electron só enxerga o que ele mesmo escreveu.
+  // Preferir wl-paste/xclip para capturar cópias de outros apps (Linux→Mac).
+  if (isLinux) {
+    try {
+      const native = readLinuxClipboardNative();
+      if (native?.type === 'image' || native?.type === 'file') {
+        return native;
+      }
+      if (native?.type === 'text') {
+        const text = String(native.data || '').trim();
+        if (text) {
+          const looksLikeMediaName =
+            /^[^\\/]+\.(mp4|m4v|mov|mkv|webm|avi|mp3|wav|pdf|zip|png|jpe?g|gif|webp)$/i.test(text);
+          if (looksLikeMediaName && !resolveNamedMediaFile(text)) {
+            console.warn('[sync] nome de mídia sem arquivo em Disco/Downloads:', text);
+          } else {
+            return { type: 'text', data: text };
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[sync] clipboard nativo linux:', err?.message || err);
+    }
+  }
+
   const imageClip = readClipboardImage();
 
   // Arquivos do Finder/Nautilus — mas no Mac imagem+path temporário causa flip/flicker.
@@ -605,12 +644,19 @@ function pushClipLocal(clip) {
 }
 
 async function pullItem(item) {
-  if (item.deviceName === getConfig('deviceName')) return;
+  if (!item?.id) return;
+  const mine = String(getConfig('deviceName') || '').trim().toLowerCase();
+  const from = String(item.deviceName || '').trim().toLowerCase();
+  if (mine && from && mine === from) return;
+
+  lastPulledRemoteId = item.id;
 
   if (item.type === 'text' && item.content) {
     writeLocalClipboardText(item.content);
     rememberClipboardAfterWrite({ type: 'text', data: item.content });
     updateTrayMenu();
+    console.log(`[sync] texto recebido de ${item.deviceName || 'remoto'}`);
+    debugLog(`[sync] texto de ${item.deviceName} -> clipboard`);
     return;
   }
 
@@ -621,12 +667,55 @@ async function pullItem(item) {
     writeLocalClipboardImage(buf);
     rememberClipboardAfterWrite({ type: 'image', data: buf });
     updateTrayMenu();
+    console.log(`[sync] imagem recebida de ${item.deviceName || 'remoto'}`);
     return;
   }
 
   // Arquivos/vídeos: não auto-cola (evita path texto); usuário escolhe no popup
   if (item.type === 'file') {
     updateTrayMenu();
+  }
+}
+
+/**
+ * Fallback: se o WebSocket do main não receber item_created,
+ * detecta itens novos via HTTP e aplica na clipboard.
+ */
+/**
+ * Fallback: se o WebSocket do main não receber item_created,
+ * detecta itens novos via HTTP e aplica na clipboard.
+ * Ignora uploads do próprio device (ex.: poll local que sobe na frente).
+ */
+async function pollRemoteItems() {
+  try {
+    const history = await fetchItemsFlat(false, 10);
+    if (!history[0]?.id) return;
+
+    if (!lastPulledRemoteId) {
+      lastPulledRemoteId = history[0].id;
+      return;
+    }
+    if (history[0].id === lastPulledRemoteId) return;
+
+    const mine = String(getConfig('deviceName') || '').trim().toLowerCase();
+    let remoteToPull = null;
+    for (const item of history) {
+      if (item.id === lastPulledRemoteId) break;
+      const from = String(item.deviceName || '').trim().toLowerCase();
+      if (mine && from && mine === from) continue;
+      if (!remoteToPull) remoteToPull = item;
+    }
+
+    lastPulledRemoteId = history[0].id;
+    if (!remoteToPull) return;
+
+    debugLog(`[pull-poll] aplicando de ${remoteToPull.deviceName}: ${(remoteToPull.content || remoteToPull.filename || '').toString().slice(0, 40)}`);
+    historyItems = [remoteToPull, ...historyItems.filter((i) => i.id !== remoteToPull.id)].slice(0, 100);
+    persistLocalCache();
+    await pullItem(remoteToPull);
+    updateTrayMenu();
+  } catch (err) {
+    debugLog(`[pull-poll] erro ${err?.message || err}`);
   }
 }
 
@@ -688,7 +777,9 @@ async function pollClipboard() {
 }
 
 async function fetchItemsFlat(pinned, limit) {
-  const res = await fetch(`${apiBase()}/items?pinned=${pinned}&limit=${limit}&flat=true`);
+  const res = await fetch(`${apiBase()}/items?pinned=${pinned}&limit=${limit}&flat=true`, {
+    signal: AbortSignal.timeout(8000),
+  });
   if (!res.ok) throw new Error('items');
   const data = await res.json();
   return Array.isArray(data) ? data : data.items || [];
@@ -733,10 +824,13 @@ function connectWs() {
     ws.close();
   }
 
+  const url = wsUrl();
+  debugLog(`[ws] connecting ${url}`);
   try {
-    ws = new WebSocket(wsUrl());
+    ws = new WebSocket(url);
   } catch (err) {
     connected = false;
+    debugLog(`[ws] construct error ${err?.message || err}`);
     updateTrayMenu();
     wsReconnectTimer = setTimeout(connectWs, 3000);
     return;
@@ -745,48 +839,69 @@ function connectWs() {
   ws.on('open', () => {
     connected = true;
     remoteFailStreak = 0;
-    try {
-      ws.send(JSON.stringify({ type: 'hello', deviceName: getConfig('deviceName') }));
-    } catch {
-      /* ok */
-    }
+    const name = getConfig('deviceName');
+    debugLog(`[ws] open hello=${name}`);
+    const sayHello = () => {
+      try {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'hello', deviceName: name }));
+        }
+      } catch {
+        /* ok */
+      }
+    };
+    sayHello();
+    setTimeout(sayHello, 400);
+    setTimeout(sayHello, 1500);
     updateTrayMenu();
   });
 
   ws.on('message', async (data) => {
-    const msg = JSON.parse(data.toString());
-    if (msg.type === 'sync_request' && msg.items) {
-      pinnedItems = msg.items.pinned || [];
-      historyItems = msg.items.history || [];
-      persistLocalCache();
-      if (!offlineMode) void cacheImportantBlobs();
-      updateTrayMenu();
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch (err) {
+      debugLog(`[ws] mensagem inválida: ${err?.message || err}`);
+      return;
     }
-    if (msg.type === 'item_created' && msg.item) {
-      if (msg.item.pinned) {
-        pinnedItems = [msg.item, ...pinnedItems.filter((i) => i.id !== msg.item.id)];
-      } else {
-        historyItems = [msg.item, ...historyItems.filter((i) => i.id !== msg.item.id)];
+    try {
+      if (msg.type === 'sync_request' && msg.items) {
+        pinnedItems = msg.items.pinned || [];
+        historyItems = msg.items.history || [];
+        if (historyItems[0]?.id) lastPulledRemoteId = historyItems[0].id;
+        persistLocalCache();
+        if (!offlineMode) void cacheImportantBlobs();
+        updateTrayMenu();
       }
-      persistLocalCache();
-      if (!offlineMode) void cacheItemBlob(msg.item);
-      updateTrayMenu();
-      await pullItem(msg.item);
-    }
-    if (msg.type === 'item_updated' && msg.item) {
-      await refreshItems();
-      updateTrayMenu();
-    }
-    if (msg.type === 'item_deleted' && msg.id) {
-      pinnedItems = pinnedItems.filter((i) => i.id !== msg.id);
-      historyItems = historyItems.filter((i) => i.id !== msg.id);
-      persistLocalCache();
-      updateTrayMenu();
+      if (msg.type === 'item_created' && msg.item) {
+        if (msg.item.pinned) {
+          pinnedItems = [msg.item, ...pinnedItems.filter((i) => i.id !== msg.item.id)];
+        } else {
+          historyItems = [msg.item, ...historyItems.filter((i) => i.id !== msg.item.id)];
+        }
+        persistLocalCache();
+        if (!offlineMode) void cacheItemBlob(msg.item);
+        updateTrayMenu();
+        await pullItem(msg.item);
+      }
+      if (msg.type === 'item_updated' && msg.item) {
+        await refreshItems();
+        updateTrayMenu();
+      }
+      if (msg.type === 'item_deleted' && msg.id) {
+        pinnedItems = pinnedItems.filter((i) => i.id !== msg.id);
+        historyItems = historyItems.filter((i) => i.id !== msg.id);
+        persistLocalCache();
+        updateTrayMenu();
+      }
+    } catch (err) {
+      console.warn('[ws] handler:', err?.message || err);
     }
   });
 
   ws.on('close', () => {
     connected = false;
+    debugLog('[ws] close');
     updateTrayMenu();
     // Quedas longas (não glitches): ativa modo local no cliente remoto
     if (!offlineMode && !getConfig('runLocalServer')) {
@@ -798,7 +913,10 @@ function connectWs() {
     wsReconnectTimer = setTimeout(connectWs, 3000);
   });
 
-  ws.on('error', () => ws?.close());
+  ws.on('error', (err) => {
+    debugLog(`[ws] error ${err?.message || err}`);
+    ws?.close();
+  });
 }
 
 async function ensureOfflineMode(reason = '') {
@@ -1669,7 +1787,7 @@ ipcMain.handle('save-config', async (_e, cfg) => {
   }
 
   if (cfg.runLocalServer) {
-    setConfig('serverUrl', `http://localhost:${cfg.port}`);
+    setConfig('serverUrl', `http://127.0.0.1:${cfg.port}`);
   }
 
   if (needsRestart) {
@@ -1700,6 +1818,16 @@ ipcMain.handle('test-hotkey', (_e, hotkey) => {
 });
 
 ipcMain.handle('paste-item', async (_e, item) => pasteItemIntoFocus(item));
+
+/** UI (renderer) também recebe item_created — aplica na clipboard se o WS do main falhar. */
+ipcMain.handle('apply-remote-item', async (_e, item) => {
+  try {
+    await pullItem(item);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
 
 ipcMain.handle('discover-servers', async () => {
   try {
@@ -1808,9 +1936,20 @@ app.whenReady().then(async () => {
   loadLocalCache();
   initUpdater();
 
+  // Linux empacotado nunca hospeda o servidor — se runLocalServer ficar true,
+  // o startup sobrescrevia serverUrl para localhost e o upload Linux→Mac morria.
+  if (isLinux && appPaths.isPackaged() && getConfig('runLocalServer')) {
+    console.warn('[syncboard] Linux empacotado: forçando modo cliente (sem servidor local)');
+    setConfig('runLocalServer', false);
+    const url = String(getConfig('serverUrl') || '');
+    if (!url || /localhost|127\.0\.0\.1/i.test(url)) {
+      console.warn('[syncboard] serverUrl local no Linux — use pareamento com o Mac');
+    }
+  }
+
   try {
     if (getConfig('runLocalServer')) {
-      setConfig('serverUrl', `http://localhost:${getConfig('port')}`);
+      setConfig('serverUrl', `http://127.0.0.1:${getConfig('port')}`);
       await startLocalServer();
     } else {
       preferredRemoteUrl = getConfig('serverUrl');
@@ -1830,7 +1969,11 @@ app.whenReady().then(async () => {
 
   setupTray();
   connectWs();
+  // Timers cedo — não depender de refreshItems (se travar, sync morre)
+  pollTimer = setInterval(pollClipboard, 1200);
+  remotePullTimer = setInterval(() => void pollRemoteItems(), 1500);
   await refreshItems();
+  if (historyItems[0]?.id) lastPulledRemoteId = historyItems[0].id;
   // Se ainda não conectou e não é servidor local, garante modo offline
   if (!connected && !getConfig('runLocalServer') && !offlineMode) {
     await ensureOfflineMode('no-connection');
@@ -1844,7 +1987,6 @@ app.whenReady().then(async () => {
     console.warn('[compact]', err.message);
   }
 
-  pollTimer = setInterval(pollClipboard, 1200);
   void checkForAppUpdate(false);
   updateCheckTimer = setInterval(() => void checkForAppUpdate(false), 6 * 60 * 60 * 1000);
 
@@ -1872,6 +2014,7 @@ app.on('before-quit', () => {
   app.isQuitting = true;
   persistLocalCache();
   if (pollTimer) clearInterval(pollTimer);
+  if (remotePullTimer) clearInterval(remotePullTimer);
   if (updateCheckTimer) clearInterval(updateCheckTimer);
   if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
   if (remoteProbeTimer) clearInterval(remoteProbeTimer);

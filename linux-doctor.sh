@@ -38,6 +38,12 @@ CONFIG="$HOME/.config/syncboard-desktop/config.json"
 [ -f "$CONFIG" ] && cat "$CONFIG" || echo "(padrão — servidor local)"
 echo ""
 
+echo "→ Clipboard tools"
+command -v wl-paste >/dev/null && echo "OK: wl-paste (Wayland)" || echo "FALTA wl-paste — sudo apt install wl-clipboard"
+command -v xclip >/dev/null && echo "OK: xclip (X11)" || echo "FALTA xclip — sudo apt install xclip"
+echo "Sessão: XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-?} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}"
+echo ""
+
 echo "=== Abrir agora ==="
 echo "  ~/mesa/projects/syncboard/linux-open.sh"
 echo "  ou: ~/mesa/projects/syncboard/desktop/launch.sh"

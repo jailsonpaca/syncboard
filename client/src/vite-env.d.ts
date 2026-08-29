@@ -8,6 +8,7 @@ interface SyncboardDesktop {
     revealed?: boolean;
     localPath?: string;
   }>;
+  applyRemoteItem?: (item: import('./types').ClipItem) => Promise<{ ok?: boolean; error?: string }>;
   getConfig?: () => Promise<Record<string, unknown>>;
   saveConfig?: (cfg: Record<string, unknown>) => Promise<unknown>;
   testHotkey?: (hotkey: string) => Promise<unknown>;

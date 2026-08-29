@@ -285,6 +285,21 @@ export default function App() {
     if (join) setJoinCode(join.toUpperCase());
   }, []);
 
+  // Electron: alinhar deviceName/serverUrl do main (evita MacIntel-xxxx / Linux-xxxx fantasmas)
+  useEffect(() => {
+    if (!window.syncboard?.getConfig) return;
+    void window.syncboard.getConfig().then((cfg) => {
+      if (typeof cfg.deviceName === 'string' && cfg.deviceName.trim()) {
+        setDeviceName(cfg.deviceName.trim());
+        setDeviceNameState(cfg.deviceName.trim());
+      }
+      if (typeof cfg.serverUrl === 'string' && cfg.serverUrl.trim()) {
+        setServerUrl(cfg.serverUrl.trim());
+        setServerInput(cfg.serverUrl.trim());
+      }
+    });
+  }, []);
+
   const refreshPairInfo = useCallback(async () => {
     try {
       const info = await fetchPairInfo();
@@ -430,6 +445,10 @@ export default function App() {
               { name: item.deviceName!, online: false },
             ])
           );
+        }
+        // Backup: se o WS do main não aplicar, a UI pede ao Electron
+        if (window.syncboard?.applyRemoteItem) {
+          void window.syncboard.applyRemoteItem(item);
         }
         if (!matchesFilter(item, typeFilter, debouncedSearch, deviceFilter)) return;
         if (item.pinned) {

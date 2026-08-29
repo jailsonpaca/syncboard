@@ -18,10 +18,12 @@ const base = `https://github.com/${owner}/${repo}/releases/download/v${version}`
 function findAsset(patterns) {
   if (!fs.existsSync(RELEASE_DIR)) return null;
   const files = fs.readdirSync(RELEASE_DIR);
+  // Prefer files that include the current version
+  const versioned = files.filter((f) => f.includes(version));
   for (const pattern of patterns) {
-    const hit = files.find((f) =>
-      typeof pattern === 'string' ? f === pattern : pattern.test(f)
-    );
+    const hit =
+      versioned.find((f) => (typeof pattern === 'string' ? f === pattern : pattern.test(f))) ||
+      files.find((f) => (typeof pattern === 'string' ? f === pattern : pattern.test(f)));
     if (hit) return hit;
   }
   return null;

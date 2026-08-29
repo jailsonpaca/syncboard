@@ -86,6 +86,96 @@ function commandExists(bin) {
   }
 }
 
+function isLinuxWayland() {
+  return Boolean(process.env.WAYLAND_DISPLAY) || process.env.XDG_SESSION_TYPE === 'wayland';
+}
+
+/**
+ * Lê clipboard no Linux via wl-paste/xclip.
+ * No Wayland o Electron só vê o que ELE escreveu — sem isso Linux→Mac quebra.
+ */
+function readLinuxClipboardNative() {
+  if (process.platform !== 'linux') return null;
+
+  const tryExec = (bin, args, encoding = 'buffer') => {
+    if (!commandExists(bin)) return null;
+    try {
+      const out = execFileSync(bin, args, {
+        encoding,
+        timeout: 2500,
+        maxBuffer: 40 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (encoding === 'utf8') {
+        const t = String(out || '').trim();
+        return t || null;
+      }
+      if (out && out.length > 0) return Buffer.isBuffer(out) ? out : Buffer.from(out);
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const wayland = isLinuxWayland();
+
+  // Imagem
+  if (wayland) {
+    const img = tryExec('wl-paste', ['-t', 'image/png']);
+    if (img && img.length > 100) {
+      return { type: 'image', data: img, mime: 'image/png' };
+    }
+  } else {
+    const img = tryExec('xclip', ['-selection', 'clipboard', '-t', 'image/png', '-o']);
+    if (img && img.length > 100) {
+      return { type: 'image', data: img, mime: 'image/png' };
+    }
+  }
+
+  // Arquivos (uri-list)
+  const uriRaw = wayland
+    ? tryExec('wl-paste', ['-t', 'text/uri-list'], 'utf8')
+    : tryExec('xclip', ['-selection', 'clipboard', '-t', 'text/uri-list', '-o'], 'utf8');
+  if (uriRaw) {
+    const paths = [];
+    for (const line of String(uriRaw).split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const p = fileUrlToPathSafe(t.split('\t')[0]);
+      if (p) paths.push(p);
+    }
+    const files = existingFiles(paths);
+    if (files.length) {
+      const filePath = files[0];
+      try {
+        const st = fs.statSync(filePath);
+        if (st.isFile()) {
+          return {
+            type: 'file',
+            filePath,
+            filename: path.basename(filePath),
+            mime: mimeFromPath(filePath),
+            size: st.size,
+            mtimeMs: st.mtimeMs,
+          };
+        }
+      } catch {
+        /* next */
+      }
+    }
+  }
+
+  // Texto
+  const text = wayland
+    ? tryExec('wl-paste', ['-n'], 'utf8') || tryExec('wl-paste', [], 'utf8')
+    : tryExec('xclip', ['-selection', 'clipboard', '-o'], 'utf8');
+  if (text) {
+    return { type: 'text', data: String(text) };
+  }
+
+  return null;
+}
+
 /**
  * WhatsApp/etc. às vezes colocam só o nome do arquivo na clipboard.
  * Resolve em Downloads / Spotlight.
@@ -437,6 +527,8 @@ function revealFileInFolder(filePath) {
 module.exports = {
   readClipboardFilePaths,
   writeClipboardFilePaths,
+  readLinuxClipboardNative,
+  isLinuxWayland,
   mimeFromPath,
   pathToFileUrl: toFileUrl,
   resolveNamedMediaFile,

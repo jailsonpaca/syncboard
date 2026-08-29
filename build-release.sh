@@ -62,8 +62,11 @@ else
 fi
 
 # Nome estável esperado pelo install-linux.sh
-if [ -f "$DESKTOP/release/SyncBoard-1.0.0-x64.tar.gz" ]; then
-  cp -f "$DESKTOP/release/SyncBoard-1.0.0-x64.tar.gz" "$DESKTOP/release/SyncBoard-linux-x64.tar.gz"
+VERSION=$(node -p "require('$DESKTOP/package.json').version")
+if [ -f "$DESKTOP/release/SyncBoard-${VERSION}-x64.tar.gz" ]; then
+  cp -f "$DESKTOP/release/SyncBoard-${VERSION}-x64.tar.gz" "$DESKTOP/release/SyncBoard-linux-x64.tar.gz"
+elif [ -f "$DESKTOP/release/SyncBoard-${VERSION}.tar.gz" ]; then
+  cp -f "$DESKTOP/release/SyncBoard-${VERSION}.tar.gz" "$DESKTOP/release/SyncBoard-linux-x64.tar.gz"
 fi
 # Fallback: empacota linux-unpacked se o tar.gz versionado não existir
 if [ ! -f "$DESKTOP/release/SyncBoard-linux-x64.tar.gz" ] && [ -d "$DESKTOP/release/linux-unpacked" ]; then
