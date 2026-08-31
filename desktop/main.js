@@ -409,12 +409,12 @@ function readClipboardImage() {
   };
 }
 
-function readLocalClipboard() {
+async function readLocalClipboard() {
   // Linux/Wayland: Electron só enxerga o que ele mesmo escreveu.
   // Preferir wl-paste/xclip para capturar cópias de outros apps (Linux→Mac).
   if (isLinux) {
     try {
-      const native = readLinuxClipboardNative();
+      const native = await readLinuxClipboardNative();
       if (native?.type === 'image' || native?.type === 'file') {
         return native;
       }
@@ -550,9 +550,9 @@ function writeLocalClipboardImage(buffer) {
 }
 
 /** Depois de escrever na clipboard, marca o hash estável (bitmap) para não reenviar. */
-function rememberClipboardAfterWrite(fallbackClip) {
+async function rememberClipboardAfterWrite(fallbackClip) {
   try {
-    const current = readLocalClipboard();
+    const current = await readLocalClipboard();
     if (current) {
       rememberHash(hashClip(current));
       return;
@@ -653,7 +653,7 @@ async function pullItem(item) {
 
   if (item.type === 'text' && item.content) {
     writeLocalClipboardText(item.content);
-    rememberClipboardAfterWrite({ type: 'text', data: item.content });
+    await rememberClipboardAfterWrite({ type: 'text', data: item.content });
     updateTrayMenu();
     console.log(`[sync] texto recebido de ${item.deviceName || 'remoto'}`);
     debugLog(`[sync] texto de ${item.deviceName} -> clipboard`);
@@ -665,7 +665,7 @@ async function pullItem(item) {
     if (!res.ok) return;
     const buf = Buffer.from(await res.arrayBuffer());
     writeLocalClipboardImage(buf);
-    rememberClipboardAfterWrite({ type: 'image', data: buf });
+    await rememberClipboardAfterWrite({ type: 'image', data: buf });
     updateTrayMenu();
     console.log(`[sync] imagem recebida de ${item.deviceName || 'remoto'}`);
     return;
@@ -726,7 +726,7 @@ async function pollClipboard() {
   pollInFlight = true;
 
   try {
-    const clip = readLocalClipboard();
+    const clip = await readLocalClipboard();
     if (!clip) return;
 
     const hash = hashClip(clip);
@@ -1045,11 +1045,11 @@ async function copyItem(item) {
   try {
     if (item.type === 'text' && item.content) {
       writeLocalClipboardText(item.content);
-      rememberClipboardAfterWrite({ type: 'text', data: item.content });
+      await rememberClipboardAfterWrite({ type: 'text', data: item.content });
     } else if (item.type === 'image') {
       const buf = await resolveItemBuffer(item);
       writeLocalClipboardImage(buf);
-      rememberClipboardAfterWrite({ type: 'image', data: buf });
+      await rememberClipboardAfterWrite({ type: 'image', data: buf });
     } else if (item.type === 'file') {
       let filePath;
       const localBuf = offlineCache.readBlob(offlineRoot(), item.id);

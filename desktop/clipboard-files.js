@@ -2,8 +2,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile, execFileSync, spawn } = require('child_process');
+const { promisify } = require('util');
 const { pathToFileURL, fileURLToPath } = require('url');
 const { clipboard } = require('electron');
+
+const execFileAsync = promisify(execFile);
+const commandExistsCache = new Map();
+const LINUX_CLIP_TIMEOUT_MS = 900;
 
 const MEDIA_NAME_RE =
   /^(?!\/)[^\\/]+?\.(mp4|m4v|mov|mkv|webm|avi|mp3|wav|m4a|aac|pdf|zip|rar|7z|png|jpe?g|gif|webp|heic|doc|docx|xls|xlsx|ppt|pptx)$/i;
@@ -78,10 +83,13 @@ function existingFiles(paths) {
 }
 
 function commandExists(bin) {
+  if (commandExistsCache.has(bin)) return commandExistsCache.get(bin);
   try {
-    execFileSync('which', [bin], { stdio: 'ignore' });
+    execFileSync('which', [bin], { stdio: 'ignore', timeout: 1000 });
+    commandExistsCache.set(bin, true);
     return true;
   } catch {
+    commandExistsCache.set(bin, false);
     return false;
   }
 }
@@ -90,87 +98,173 @@ function isLinuxWayland() {
   return Boolean(process.env.WAYLAND_DISPLAY) || process.env.XDG_SESSION_TYPE === 'wayland';
 }
 
-/**
- * Lê clipboard no Linux via wl-paste/xclip.
- * No Wayland o Electron só vê o que ELE escreveu — sem isso Linux→Mac quebra.
- */
-function readLinuxClipboardNative() {
-  if (process.platform !== 'linux') return null;
+function targetListHas(targets, needle) {
+  const n = String(needle).toLowerCase();
+  return targets.some((t) => t.toLowerCase() === n || t.toLowerCase().startsWith(`${n};`));
+}
 
-  const tryExec = (bin, args, encoding = 'buffer') => {
-    if (!commandExists(bin)) return null;
-    try {
-      const out = execFileSync(bin, args, {
-        encoding,
-        timeout: 2500,
-        maxBuffer: 40 * 1024 * 1024,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      if (encoding === 'utf8') {
-        const t = String(out || '').trim();
-        return t || null;
-      }
-      if (out && out.length > 0) return Buffer.isBuffer(out) ? out : Buffer.from(out);
-      return null;
-    } catch {
-      return null;
-    }
-  };
+function pickImageMime(targets) {
+  const preferred = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/bmp', 'image/gif'];
+  for (const mime of preferred) {
+    if (targetListHas(targets, mime)) return mime === 'image/jpg' ? 'image/jpeg' : mime;
+  }
+  return null;
+}
+
+/**
+ * Lista MIME types disponíveis sem pedir o conteúdo.
+ * Evita wl-paste/xclip travarem ao pedir image/png quando a clipboard só tem texto.
+ */
+async function listLinuxClipboardTargets() {
+  if (process.platform !== 'linux') return [];
 
   const wayland = isLinuxWayland();
-
-  // Imagem
-  if (wayland) {
-    const img = tryExec('wl-paste', ['-t', 'image/png']);
-    if (img && img.length > 100) {
-      return { type: 'image', data: img, mime: 'image/png' };
+  try {
+    if (wayland && commandExists('wl-paste')) {
+      const { stdout } = await execFileAsync('wl-paste', ['-l'], {
+        encoding: 'utf8',
+        timeout: LINUX_CLIP_TIMEOUT_MS,
+        maxBuffer: 256 * 1024,
+      });
+      return String(stdout || '')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
     }
-  } else {
-    const img = tryExec('xclip', ['-selection', 'clipboard', '-t', 'image/png', '-o']);
+    if (commandExists('xclip')) {
+      const { stdout } = await execFileAsync(
+        'xclip',
+        ['-selection', 'clipboard', '-t', 'TARGETS', '-o'],
+        {
+          encoding: 'utf8',
+          timeout: LINUX_CLIP_TIMEOUT_MS,
+          maxBuffer: 256 * 1024,
+        }
+      );
+      return String(stdout || '')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+    }
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+async function execLinuxClipboard(bin, args, encoding = 'buffer') {
+  if (!commandExists(bin)) return null;
+  try {
+    const opts = {
+      timeout: LINUX_CLIP_TIMEOUT_MS,
+      maxBuffer: 40 * 1024 * 1024,
+      encoding: encoding === 'utf8' ? 'utf8' : 'buffer',
+    };
+    const { stdout } = await execFileAsync(bin, args, opts);
+    if (encoding === 'utf8') {
+      const t = String(stdout || '').trim();
+      return t || null;
+    }
+    if (stdout && stdout.length > 0) {
+      return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lê clipboard no Linux via wl-paste/xclip (async — não bloqueia a main thread).
+ * No Wayland o Electron só vê o que ELE escreveu — sem isso Linux→Mac quebra.
+ *
+ * Importante: lista targets primeiro. Pedir image/png sem imagem faz wl-paste
+ * esperar até timeout e congelava o SyncBoard a cada poll.
+ */
+async function readLinuxClipboardNative() {
+  if (process.platform !== 'linux') return null;
+
+  const wayland = isLinuxWayland();
+  const targets = await listLinuxClipboardTargets();
+
+  // Sem targets: não pedir image/uri às cegas (trava). Só tenta texto uma vez.
+  if (!targets.length) {
+    const text = wayland
+      ? (await execLinuxClipboard('wl-paste', ['-n'], 'utf8')) ||
+        (await execLinuxClipboard('wl-paste', [], 'utf8'))
+      : await execLinuxClipboard('xclip', ['-selection', 'clipboard', '-o'], 'utf8');
+    if (text) return { type: 'text', data: String(text) };
+    return null;
+  }
+
+  // Imagem — só se o tipo existir
+  const imageMime = pickImageMime(targets);
+  if (imageMime) {
+    const img = wayland
+      ? await execLinuxClipboard('wl-paste', ['-t', imageMime])
+      : await execLinuxClipboard('xclip', ['-selection', 'clipboard', '-t', imageMime, '-o']);
     if (img && img.length > 100) {
-      return { type: 'image', data: img, mime: 'image/png' };
+      return { type: 'image', data: img, mime: imageMime };
     }
   }
 
   // Arquivos (uri-list)
-  const uriRaw = wayland
-    ? tryExec('wl-paste', ['-t', 'text/uri-list'], 'utf8')
-    : tryExec('xclip', ['-selection', 'clipboard', '-t', 'text/uri-list', '-o'], 'utf8');
-  if (uriRaw) {
-    const paths = [];
-    for (const line of String(uriRaw).split(/\r?\n/)) {
-      const t = line.trim();
-      if (!t || t.startsWith('#')) continue;
-      const p = fileUrlToPathSafe(t.split('\t')[0]);
-      if (p) paths.push(p);
-    }
-    const files = existingFiles(paths);
-    if (files.length) {
-      const filePath = files[0];
-      try {
-        const st = fs.statSync(filePath);
-        if (st.isFile()) {
-          return {
-            type: 'file',
-            filePath,
-            filename: path.basename(filePath),
-            mime: mimeFromPath(filePath),
-            size: st.size,
-            mtimeMs: st.mtimeMs,
-          };
+  const wantUri =
+    targetListHas(targets, 'text/uri-list') ||
+    targetListHas(targets, 'x-special/gnome-copied-files');
+  if (wantUri) {
+    const uriRaw = wayland
+      ? await execLinuxClipboard('wl-paste', ['-t', 'text/uri-list'], 'utf8')
+      : await execLinuxClipboard(
+          'xclip',
+          ['-selection', 'clipboard', '-t', 'text/uri-list', '-o'],
+          'utf8'
+        );
+    if (uriRaw) {
+      const paths = [];
+      for (const line of String(uriRaw).split(/\r?\n/)) {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) continue;
+        const p = fileUrlToPathSafe(t.split('\t')[0]);
+        if (p) paths.push(p);
+      }
+      const files = existingFiles(paths);
+      if (files.length) {
+        const filePath = files[0];
+        try {
+          const st = fs.statSync(filePath);
+          if (st.isFile()) {
+            return {
+              type: 'file',
+              filePath,
+              filename: path.basename(filePath),
+              mime: mimeFromPath(filePath),
+              size: st.size,
+              mtimeMs: st.mtimeMs,
+            };
+          }
+        } catch {
+          /* next */
         }
-      } catch {
-        /* next */
       }
     }
   }
 
   // Texto
-  const text = wayland
-    ? tryExec('wl-paste', ['-n'], 'utf8') || tryExec('wl-paste', [], 'utf8')
-    : tryExec('xclip', ['-selection', 'clipboard', '-o'], 'utf8');
-  if (text) {
-    return { type: 'text', data: String(text) };
+  const wantText =
+    targetListHas(targets, 'text/plain') ||
+    targetListHas(targets, 'text/plain;charset=utf-8') ||
+    targetListHas(targets, 'UTF8_STRING') ||
+    targetListHas(targets, 'STRING') ||
+    targetListHas(targets, 'TEXT');
+  if (wantText) {
+    const text = wayland
+      ? (await execLinuxClipboard('wl-paste', ['-n'], 'utf8')) ||
+        (await execLinuxClipboard('wl-paste', [], 'utf8'))
+      : await execLinuxClipboard('xclip', ['-selection', 'clipboard', '-o'], 'utf8');
+    if (text) {
+      return { type: 'text', data: String(text) };
+    }
   }
 
   return null;
