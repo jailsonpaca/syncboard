@@ -260,6 +260,13 @@
       }
     });
 
+    $('pairCode').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        if (!$('joinCode').disabled) $('joinCode').click();
+      }
+    });
+
     $('save').addEventListener('click', async () => {
       const hotkey = $('hotkey').value.trim();
       if (hotkey) {

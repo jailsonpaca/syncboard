@@ -39,6 +39,30 @@ interface SyncboardDesktop {
     releaseNotes?: string;
   }>;
   openExternal?: (url: string) => Promise<{ ok?: boolean; error?: string; url?: string }>;
+  getPathForFile?: (file: File) => string;
+  checkFfmpeg?: () => Promise<{ ok: boolean; path?: string; version?: string; error?: string }>;
+  pickVideo?: () => Promise<string | null>;
+  convertVideo?: (opts: {
+    input: string;
+    preset?: 'light' | 'balanced' | 'high';
+    maxMB?: number | null;
+  }) => Promise<{ ok: boolean; outputPath?: string; sizeBytes?: number; error?: string; cancelled?: boolean }>;
+  cancelVideo?: () => Promise<{ ok: boolean }>;
+  revealVideo?: (path: string) => Promise<{ ok: boolean }>;
+  sendVideoToHistory?: (path: string) => Promise<{ ok: boolean; error?: string }>;
+  recStatus?: () => Promise<{ platform: string; screen: string; microphone: string; outputDir: string }>;
+  recOpenPrivacy?: (kind: 'screen' | 'microphone') => Promise<{ ok: boolean }>;
+  recAskMic?: () => Promise<{ ok: boolean }>;
+  recSources?: () => Promise<{
+    ok: boolean;
+    error?: string;
+    sources: Array<{ id: string; name: string; kind: 'screen' | 'window'; thumbnail: string }>;
+  }>;
+  recSelect?: (sel: { sourceId: string; systemAudio?: boolean }) => Promise<{ ok: boolean }>;
+  recBegin?: (opts: { ext: 'mp4' | 'webm' }) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
+  recChunk?: (data: ArrayBuffer) => Promise<{ ok: boolean; error?: string }>;
+  recEnd?: (opts?: { discard?: boolean }) => Promise<{ ok: boolean; outputPath?: string; sizeBytes?: number; error?: string }>;
+  onVideoProgress?: (cb: (data: { percent: number }) => void) => () => void;
   onUpdateStatus?: (cb: (data: {
     updateAvailable?: boolean;
     version?: string | null;

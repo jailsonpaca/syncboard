@@ -1,0 +1,48 @@
+.tools-tab { display: flex; flex-direction: column; gap: 14px; padding: 4px 0 24px; }
+.tools-nav { display: flex; flex-direction: column; gap: 8px; }
+.tools-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tools-group-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); min-width: 92px; }
+.tools-title { font-size: 16px; font-weight: 600; }
+.tools-body, .tool { display: flex; flex-direction: column; gap: 12px; }
+
+.chip { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+.chip:hover:not(:disabled) { border-color: var(--accent); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip:disabled { opacity: 0.5; cursor: default; }
+
+.tool-field { display: flex; flex-direction: column; gap: 6px; }
+.tool-label { font-size: 12px; color: var(--muted); }
+.tool-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.tool-row.between { justify-content: space-between; align-items: center; }
+.tool-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .tool-cols { grid-template-columns: 1fr; } }
+
+.tool-text, .tool-input { width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+.tool-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+.tool-input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tool-row .tool-input { width: auto; flex: 1; min-width: 120px; }
+.tool-text:focus, .tool-input:focus { outline: none; border-color: var(--accent); }
+.tool-code { display: block; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; word-break: break-all; user-select: all; }
+.tool-error { color: var(--danger); font-size: 13px; background: color-mix(in srgb, var(--danger) 10%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); border-radius: 8px; padding: 8px 10px; }
+.tool-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.tool-swatch { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border); flex: none; }
+.tool-match { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+
+.tool-diff { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 0; font-size: 12px; overflow-x: auto; }
+.tool-diff div { padding: 0 10px; white-space: pre; }
+.diff-add { background: color-mix(in srgb, var(--success) 18%, transparent); }
+.diff-del { background: color-mix(in srgb, var(--danger) 18%, transparent); }
+
+.tool-drop { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--muted); word-break: break-all; }
+.tool-drop strong { color: var(--text); }
+.tool-progress { height: 8px; background: var(--surface2); border-radius: 999px; overflow: hidden; }
+.tool-progress > div { height: 100%; background: var(--accent); transition: width 0.2s; }
+
+.rec-sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; max-height: 280px; overflow-y: auto; }
+.rec-source { display: flex; flex-direction: column; gap: 4px; background: var(--surface); color: var(--text); border: 2px solid var(--border); border-radius: 10px; padding: 6px; cursor: pointer; text-align: left; font-size: 12px; }
+.rec-source img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 6px; background: var(--surface2); }
+.rec-source span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-source.active { border-color: var(--accent); }
+.rec-source:disabled { opacity: 0.6; cursor: default; }
+.rec-big { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rec-live { color: var(--danger); }

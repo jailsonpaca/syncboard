@@ -10,6 +10,9 @@ const {
   ipcMain,
   globalShortcut,
   Notification,
+  desktopCapturer,
+  systemPreferences,
+  session,
 } = require('electron');
 const { spawn, execSync } = require('child_process');
 const crypto = require('crypto');
@@ -21,6 +24,8 @@ const WebSocket = require('ws');
 const autostart = require('./autostart');
 const hotkeyUtil = require('./hotkey');
 const appPaths = require('./paths');
+const videoConvert = require('./video-convert');
+const screenRecord = require('./screen-record');
 const offlineCache = require('./offline-cache');
 const { createOfflineHub } = require('./offline-hub');
 const { simulatePaste, sleep } = require('./paste');
@@ -1916,6 +1921,60 @@ ipcMain.handle('install-update', () => {
   }
 });
 ipcMain.handle('open-external', async (_e, url) => openExternalUrl(url));
+
+// ---- Conversor de vídeo -> MP4 (WhatsApp), ffmpeg do sistema ----
+// Só caminhos gerados por uma conversão podem ser revelados/enviados (o renderer pode vir de servidor remoto).
+const videoOutputs = new Set();
+ipcMain.handle('video-check', () => videoConvert.checkFfmpeg());
+ipcMain.handle('video-pick', async (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showOpenDialog(win || undefined, {
+    title: 'Escolha o vídeo',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Vídeos', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'wmv', 'flv', 'mpg', 'mpeg', '3gp', 'ts', 'mts', 'm2ts', 'ogv'] },
+      { name: 'Todos os arquivos', extensions: ['*'] },
+    ],
+  });
+  return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+});
+ipcMain.handle('video-convert', async (e, opts) => {
+  try {
+    const input = typeof opts?.input === 'string' ? opts.input : '';
+    if (!path.isAbsolute(input) || !fs.existsSync(input) || !fs.statSync(input).isFile()) {
+      return { ok: false, error: 'Arquivo inválido' };
+    }
+    const r = await videoConvert.convertToWhatsApp(
+      { input, preset: opts.preset, maxMB: opts.maxMB },
+      (percent) => {
+        if (!e.sender.isDestroyed()) e.sender.send('video-progress', { percent });
+      }
+    );
+    videoOutputs.add(r.outputPath);
+    return r;
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err), cancelled: /cancelad/i.test(err?.message || '') };
+  }
+});
+ipcMain.handle('video-cancel', () => ({ ok: videoConvert.cancel() }));
+ipcMain.handle('video-reveal', (_e, p) => {
+  if (!videoOutputs.has(p)) return { ok: false };
+  shell.showItemInFolder(p);
+  return { ok: true };
+});
+ipcMain.handle('video-send-to-history', async (_e, p) => {
+  try {
+    if (!videoOutputs.has(p) || !fs.existsSync(p)) return { ok: false, error: 'Arquivo não encontrado' };
+    const size = fs.statSync(p).size;
+    if (size > MAX_FILE_UPLOAD) {
+      return { ok: false, error: `Arquivo maior que o limite de ${MAX_FILE_UPLOAD / 1024 / 1024} MB do histórico` };
+    }
+    const ok = await pushClip({ type: 'file', filePath: p, filename: path.basename(p), mime: 'video/mp4', size });
+    return ok ? { ok: true } : { ok: false, error: 'Falha ao enviar ao servidor' };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
 ipcMain.handle('get-update-notes', async () => {
   const notes = await ensureReleaseNotes();
   return {
@@ -1932,6 +1991,7 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(async () => {
+  screenRecord.register({ ipcMain, session, desktopCapturer, systemPreferences, shell, app, allowedOutputs: videoOutputs });
   setupAutostart();
   loadLocalCache();
   initUpdater();

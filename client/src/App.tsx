@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import QRCode from 'qrcode';
+import { ToolsTab } from './tools/ToolsTab';
 import type { ClipItem, TypeFilter } from './types';
 import {
   blobUrl,
@@ -32,7 +33,7 @@ import {
   type UpdateStatus,
 } from './api';
 
-type Tab = 'history' | 'pinned';
+type Tab = 'history' | 'pinned' | 'tools';
 
 type ContextMenuState = {
   item: ClipItem;
@@ -962,6 +963,12 @@ export default function App() {
               <input
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    if (!joining && joinCode.trim()) void handleJoinCode();
+                  }
+                }}
                 placeholder="Ex: A3K9P2"
                 maxLength={8}
               />
@@ -1004,7 +1011,14 @@ export default function App() {
         <button className={tab === 'pinned' ? 'tab active' : 'tab'} onClick={() => setTab('pinned')}>
           Fixo ({tab === 'pinned' ? countLabel : pinnedTotal})
         </button>
+        {!isCompactView && (
+          <button className={tab === 'tools' ? 'tab active' : 'tab'} onClick={() => setTab('tools')}>
+            Ferramentas
+          </button>
+        )}
       </div>
+
+      {tab === 'tools' && !isCompactView && <ToolsTab onToast={showToast} />}
 
       {tab === 'pinned' && !isCompactView && (
         <div className="pin-create">
@@ -1012,6 +1026,7 @@ export default function App() {
         </div>
       )}
 
+      {tab !== 'tools' && (<>
       <div className="search-zone">
         <input
           className="search-input"
@@ -1087,6 +1102,7 @@ export default function App() {
           />
         ))}
       </main>
+      </>)}
 
       {contextMenu && (
         <>
@@ -1154,7 +1170,7 @@ export default function App() {
         </>
       )}
 
-      {!loading && hasMore && (
+      {tab !== 'tools' && !loading && hasMore && (
         <div className="pagination">
           <button
             className="btn"

@@ -84,7 +84,11 @@
       "icon": "icons/icon.png",
       "identity": null,
       "gatekeeperAssess": false,
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "O SyncBoard usa o microfone para gravar sua voz junto com a gravação de tela (opcional).",
+        "NSScreenCaptureUsageDescription": "O SyncBoard grava a tela ou janelas que você escolher."
+      }
     },
     "linux": {
       "target": [
