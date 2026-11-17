@@ -52,7 +52,15 @@ export CSC_LINK=""
 export CSC_KEY_PASSWORD=""
 
 if [ "$OS" = "Darwin" ]; then
-  npx electron-builder --mac dmg zip --x64
+  # Mac nativo: arm64 em Apple Silicon (evita Rosetta/aviso de descontinuação).
+  # O better-sqlite3 é recompilado acima para a arquitetura da máquina de build,
+  # então o alvo do Mac precisa ser a mesma. Sobrescreva com SYNCBOARD_MAC_ARCH=x64 se precisar.
+  case "$(uname -m)" in
+    arm64|aarch64) DEFAULT_MAC_ARCH=arm64 ;;
+    *) DEFAULT_MAC_ARCH=x64 ;;
+  esac
+  MAC_ARCH="${SYNCBOARD_MAC_ARCH:-$DEFAULT_MAC_ARCH}"
+  npx electron-builder --mac dmg zip --"$MAC_ARCH"
   # AppImage + tar.gz (install-linux.sh usa o tar)
   npx electron-builder --linux AppImage tar.gz --x64
 elif [[ "$OS" == MINGW* || "$OS" == MSYS* || "$OS" == CYGWIN* || "$OS" == "Windows_NT" ]]; then

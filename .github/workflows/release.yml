@@ -117,7 +117,7 @@ jobs:
           cp -r ../client/dist/* resources/client/
           ELECTRON_VERSION=$(node -p "require('./node_modules/electron/package.json').version")
           npx @electron/rebuild -v "$ELECTRON_VERSION" -m . -w better-sqlite3 -p resources/server
-          npx electron-builder --mac dmg zip --x64 --publish never
+          npx electron-builder --mac dmg zip --arm64 --publish never
           node ../scripts/write-latest-json.js
 
       - name: Upload macOS artifacts
