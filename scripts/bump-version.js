@@ -14,6 +14,7 @@ const PACKAGES = [
   'server/package.json',
   'desktop/package.json',
   'daemon/package.json',
+  'src-tauri/tauri.conf.json',
 ];
 
 function readJson(rel) {
@@ -48,6 +49,19 @@ for (const rel of PACKAGES) {
   pkg.version = version;
   writeJson(rel, pkg);
   console.log(`✓ ${rel} → ${version}`);
+}
+
+const cargoTomlPath = path.join(ROOT, 'Cargo.toml');
+if (fs.existsSync(cargoTomlPath)) {
+  const raw = fs.readFileSync(cargoTomlPath, 'utf8');
+  const updated = raw.replace(
+    /(\[workspace\.package\][\s\S]*?version\s*=\s*")[^"]+(")/,
+    `$1${version}$2`
+  );
+  if (updated !== raw) {
+    fs.writeFileSync(cargoTomlPath, updated);
+    console.log(`✓ Cargo.toml → ${version}`);
+  }
 }
 
 console.log(`Versão sincronizada: ${version}`);

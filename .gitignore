@@ -23,3 +23,7 @@ android/*.apk
 android/*.aab
 android/release.keystore
 android/app/release/
+target/
+src-tauri/target/
+src-tauri/gen/
+

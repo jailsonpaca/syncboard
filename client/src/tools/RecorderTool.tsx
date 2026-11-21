@@ -39,6 +39,7 @@ export function RecorderTool({ onToast }: ToolProps) {
   const [busy, setBusy] = useState(false);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const nativeRecActiveRef = useRef(false);
   const streamsRef = useRef<MediaStream[]>([]);
   const queueRef = useRef<Promise<unknown>>(Promise.resolve());
   const ctxRef = useRef<AudioContext | null>(null);
@@ -73,6 +74,11 @@ export function RecorderTool({ onToast }: ToolProps) {
   // Se o usuário sair da aba durante a gravação, descarta e libera captura/microfone.
   useEffect(
     () => () => {
+      if (nativeRecActiveRef.current) {
+        nativeRecActiveRef.current = false;
+        stoppingRef.current = true;
+        void api?.recStopNative?.({ discard: true });
+      }
       if (recorderRef.current && recorderRef.current.state !== 'inactive') {
         stoppingRef.current = true;
         recorderRef.current.onstop = null;
@@ -109,13 +115,32 @@ export function RecorderTool({ onToast }: ToolProps) {
     }
   };
 
+  const finishNative = async () => {
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
+    nativeRecActiveRef.current = false;
+    setPhase('saving');
+    cleanup();
+    const r = await api.recStopNative!({ discard: false });
+    if (r.ok && r.outputPath) {
+      setOutput({ path: r.outputPath, size: r.sizeBytes ?? 0 });
+      setPhase('done');
+      onToast('Gravação salva');
+    } else {
+      setError(r.error || 'Falha ao salvar a gravação');
+      setPhase('idle');
+    }
+  };
+
   const start = async () => {
     if (!selected) return;
     setError(null);
     setOutput(null);
     stoppingRef.current = false;
-    const fmt = pickMime();
-    if (!fmt) {
+
+    const useNative = Boolean(api.recStartNative && api.recStopNative);
+    const fmt = useNative ? null : pickMime();
+    if (!useNative && !fmt) {
       setError('Este app não suporta gravação de vídeo (MediaRecorder).');
       return;
     }
@@ -131,6 +156,24 @@ export function RecorderTool({ onToast }: ToolProps) {
     for (let i = 3; i > 0; i--) {
       setCount(i);
       await new Promise((r) => setTimeout(r, 1000));
+    }
+
+    if (useNative) {
+      try {
+        const res = await api.recStartNative!({ sourceId: selected, mic, systemAudio: sysAudio });
+        if (!res.ok) throw new Error(res.error || 'Falha ao iniciar gravação nativa');
+        nativeRecActiveRef.current = true;
+        setElapsed(0);
+        setPhase('recording');
+        timerRef.current = window.setInterval(() => setElapsed((s) => s + 1), 1000);
+      } catch (e) {
+        cleanup();
+        setPhase('idle');
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        void refreshStatus();
+      }
+      return;
     }
 
     try {
@@ -169,10 +212,10 @@ export function RecorderTool({ onToast }: ToolProps) {
       }
 
       const stream = new MediaStream([...display.getVideoTracks(), ...audioTracks]);
-      const begin = await api.recBegin!({ ext: fmt.ext });
+      const begin = await api.recBegin!({ ext: fmt!.ext });
       if (!begin.ok) throw new Error(begin.error || 'Não foi possível criar o arquivo');
 
-      const recorder = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: 6_000_000 });
+      const recorder = new MediaRecorder(stream, { mimeType: fmt!.mime, videoBitsPerSecond: 6_000_000 });
       recorderRef.current = recorder;
       queueRef.current = Promise.resolve();
       recorder.ondataavailable = (ev) => {
@@ -203,6 +246,10 @@ export function RecorderTool({ onToast }: ToolProps) {
   };
 
   const stop = () => {
+    if (nativeRecActiveRef.current) {
+      void finishNative();
+      return;
+    }
     if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
   };
 

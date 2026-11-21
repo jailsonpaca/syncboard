@@ -2,6 +2,7 @@
 
 interface SyncboardDesktop {
   isElectron?: boolean;
+  isTauri?: boolean;
   pasteItem?: (item: import('./types').ClipItem) => Promise<{
     ok?: boolean;
     pasted?: boolean;
@@ -62,6 +63,9 @@ interface SyncboardDesktop {
   recBegin?: (opts: { ext: 'mp4' | 'webm' }) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
   recChunk?: (data: ArrayBuffer) => Promise<{ ok: boolean; error?: string }>;
   recEnd?: (opts?: { discard?: boolean }) => Promise<{ ok: boolean; outputPath?: string; sizeBytes?: number; error?: string }>;
+  recStartNative?: (opts: { sourceId: string; mic?: boolean; systemAudio?: boolean }) => Promise<{ ok: boolean; filePath?: string; error?: string }>;
+  recStopNative?: (opts?: { discard?: boolean }) => Promise<{ ok: boolean; outputPath?: string; sizeBytes?: number; error?: string }>;
+  onFileDrop?: (cb: (paths: string[]) => void) => () => void;
   onVideoProgress?: (cb: (data: { percent: number }) => void) => () => void;
   onUpdateStatus?: (cb: (data: {
     updateAvailable?: boolean;

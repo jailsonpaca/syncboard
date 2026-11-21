@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Preferências — SyncBoard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #0f0f12;
+      color: #e8e8ed;
+      padding: 20px;
+    }
+    h1 { font-size: 1.1rem; margin-bottom: 16px; }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 14px;
+      font-size: 0.85rem;
+      color: #8888a0;
+    }
+    input[type="text"], input[type="number"] {
+      background: #1a1a21;
+      border: 1px solid #2e2e3a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #e8e8ed;
+      font-size: 0.95rem;
+    }
+    .hotkey-row { display: flex; gap: 8px; align-items: stretch; }
+    .hotkey-row input { flex: 1; }
+    .hotkey-row button {
+      flex: 0 0 auto;
+      padding: 10px 14px;
+      background: #24242e;
+      color: #e8e8ed;
+      border: 1px solid #2e2e3a;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .hotkey-row button.recording { background: #6c5ce7; border-color: #6c5ce7; color: white; }
+    .checkbox { flex-direction: row; align-items: center; gap: 10px; color: #e8e8ed; }
+    .checkbox input { width: 18px; height: 18px; }
+    .hint { font-size: 0.78rem; color: #666; margin-top: -8px; margin-bottom: 14px; line-height: 1.4; }
+    .actions { display: flex; gap: 10px; margin-top: 8px; }
+    button { flex: 1; padding: 10px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.9rem; }
+    .primary { background: #6c5ce7; color: white; }
+    .secondary { background: #24242e; color: #e8e8ed; }
+    .network {
+      background: #1a1a21;
+      border: 1px solid #2e2e3a;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 14px;
+      font-size: 0.85rem;
+    }
+    .network strong { color: #00cec9; }
+  </style>
+</head>
+<body>
+  <h1>Preferências SyncBoard</h1>
+  <div class="network" id="network-info"></div>
+
+  <label class="checkbox">
+    <input type="checkbox" id="runLocalServer" />
+    Rodar servidor neste computador
+  </label>
+  <p class="hint">Ative no Mac/Linux que ficará sempre ligado na rede. Outros dispositivos conectam ao IP dele.</p>
+
+  <label>
+    Porta do servidor
+    <input type="number" id="port" min="1024" max="65535" value="8787" />
+  </label>
+
+  <label>
+    Código do servidor (pareamento LAN)
+    <div class="hotkey-row">
+      <input type="text" id="pairCode" placeholder="Ex: A3K9P2" maxlength="8" style="text-transform:uppercase;letter-spacing:0.12em;font-weight:600" />
+      <button type="button" id="joinCode">Parear</button>
+    </div>
+  </label>
+  <p class="hint">Na mesma Wi‑Fi do servidor: digite o código de 6 caracteres (ou cole o QR). Não precisa do IP.</p>
+
+  <label>
+    URL do servidor (clientes remotos)
+    <input type="text" id="serverUrl" placeholder="http://192.168.1.10:8787" />
+  </label>
+  <p class="hint">Desative "servidor local" e coloque o IP da máquina que roda o servidor — ou use o código acima.</p>
+
+  <label>
+    Nome deste dispositivo
+    <input type="text" id="deviceName" />
+  </label>
+
+  <label class="checkbox">
+    <input type="checkbox" id="autoSync" />
+    Sync automático do clipboard
+  </label>
+
+  <label class="checkbox">
+    <input type="checkbox" id="autoUpdate" />
+    Buscar atualizações automaticamente
+  </label>
+  <p class="hint" id="version-hint">O app avisa no menu quando houver nova versão.</p>
+
+  <label class="checkbox">
+    <input type="checkbox" id="launchAtLogin" />
+    Iniciar com o sistema
+  </label>
+  <p class="hint">Abre o SyncBoard automaticamente ao ligar o computador (ícone na barra/bandeja).</p>
+
+  <label>
+    Atalho de teclado (popup compacto)
+    <div class="hotkey-row">
+      <input type="text" id="hotkey" readonly placeholder="Alt+V" />
+      <button type="button" id="recordHotkey">Gravar</button>
+    </div>
+  </label>
+  <p class="hint">Clique em Gravar e pressione a combinação (ex.: Alt+V / ⌥V). Usa a tecla física.</p>
+
+  <div class="actions">
+    <button class="secondary" id="cancel">Cancelar</button>
+    <button class="primary" id="save">Salvar</button>
+  </div>
+
+  <script type="module" src="/src/prefs.ts"></script>
+</body>
+</html>

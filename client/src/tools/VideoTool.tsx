@@ -43,6 +43,19 @@ export function VideoTool({ onToast }: ToolProps) {
     return api.onVideoProgress((d) => setPercent(d.percent));
   }, [api]);
 
+  useEffect(() => {
+    if (!api?.onFileDrop) return;
+    return api.onFileDrop((paths) => {
+      const first = paths[0];
+      if (first) {
+        setInput(first);
+        setOutput(null);
+        setError(null);
+        setPhase('idle');
+      }
+    });
+  }, [api]);
+
   const pick = useCallback(async () => {
     const p = await api?.pickVideo?.();
     if (p) {

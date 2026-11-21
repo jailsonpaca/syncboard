@@ -8,71 +8,41 @@ on:
 permissions:
   contents: write
 
-env:
-  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            client/package-lock.json
-            server/package-lock.json
-            desktop/package-lock.json
 
-      - name: Install dependencies
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux Tauri system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev clang libclang-dev pkg-config libssl-dev libxdo-dev
+
+      - name: Install JS deps
         run: |
           npm ci || npm install
-          npm run install:all
+          cd client && (npm ci || npm install)
 
       - name: Sync version from tag
         run: node scripts/bump-version.js "${GITHUB_REF_NAME}"
 
-      - name: Build release (Linux)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SYNCBOARD_GH_OWNER: ${{ github.repository_owner }}
-          SYNCBOARD_GH_REPO: ${{ github.event.repository.name }}
-        run: |
-          npm run build
-          cd server && npm install --omit=dev --no-audit --no-fund
-          cd ../desktop
-          npm install --no-audit --no-fund
-          node generate-icons.js
-          # Preparar resources
-          rm -rf resources && mkdir -p resources/server resources/client
-          cp -r ../server/dist resources/server/
-          cp ../server/package.json resources/server/
-          cp ../release.config.json resources/server/
-          cp -r ../server/node_modules resources/server/
-          cp -r ../client/dist/* resources/client/
-          ELECTRON_VERSION=$(node -p "require('./node_modules/electron/package.json').version")
-          npx @electron/rebuild -v "$ELECTRON_VERSION" -m . -w better-sqlite3 -p resources/server
-          npx electron-builder --linux AppImage tar.gz deb --x64 --publish never
-          # Nome estável
-          VER=$(node -p "require('../package.json').version")
-          if [ -f "release/SyncBoard-${VER}-x64.tar.gz" ]; then
-            cp -f "release/SyncBoard-${VER}-x64.tar.gz" release/SyncBoard-linux-x64.tar.gz
-          fi
-          node ../scripts/write-latest-json.js
+      - name: Build Tauri release (Linux)
+        run: npx tauri build --bundles deb,appimage
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-release
           path: |
-            desktop/release/*.AppImage
-            desktop/release/*.tar.gz
-            desktop/release/*.deb
-            desktop/release/latest*.yml
-            desktop/release/latest.json
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/deb/*.deb
 
   build-mac:
     runs-on: macos-latest
@@ -82,54 +52,33 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            client/package-lock.json
-            server/package-lock.json
-            desktop/package-lock.json
 
-      - name: Install dependencies
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JS deps
         run: |
           npm ci || npm install
-          npm run install:all
+          cd client && (npm ci || npm install)
 
       - name: Sync version from tag
         run: node scripts/bump-version.js "${GITHUB_REF_NAME}"
 
-      - name: Build release (macOS)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-          SYNCBOARD_GH_OWNER: ${{ github.repository_owner }}
-          SYNCBOARD_GH_REPO: ${{ github.event.repository.name }}
+      - name: Build Tauri release (macOS)
+        run: npx tauri build --bundles dmg,app
+
+      - name: Zip macOS .app
         run: |
-          npm run build
-          cd server && npm install --omit=dev --no-audit --no-fund
-          cd ../desktop
-          npm install --no-audit --no-fund
-          node generate-icons.js
-          rm -rf resources && mkdir -p resources/server resources/client
-          cp -r ../server/dist resources/server/
-          cp ../server/package.json resources/server/
-          cp ../release.config.json resources/server/
-          cp -r ../server/node_modules resources/server/
-          cp -r ../client/dist/* resources/client/
-          ELECTRON_VERSION=$(node -p "require('./node_modules/electron/package.json').version")
-          npx @electron/rebuild -v "$ELECTRON_VERSION" -m . -w better-sqlite3 -p resources/server
-          npx electron-builder --mac dmg zip --arm64 --publish never
-          node ../scripts/write-latest-json.js
+          VER=$(node -p "require('./package.json').version")
+          cd target/release/bundle/macos
+          ditto -c -k --sequesterRsrc --keepParent SyncBoard.app "SyncBoard-${VER}-arm64-mac.zip"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: mac-release
           path: |
-            desktop/release/*.dmg
-            desktop/release/*-mac.zip
-            desktop/release/*.zip
-            desktop/release/latest*.yml
-            desktop/release/latest.json
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/macos/*.zip
 
   build-windows:
     runs-on: windows-latest
@@ -139,57 +88,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            client/package-lock.json
-            server/package-lock.json
-            desktop/package-lock.json
 
-      - name: Install dependencies
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JS deps
         shell: bash
         run: |
           npm ci || npm install
-          npm run install:all
+          cd client && (npm ci || npm install)
 
       - name: Sync version from tag
         shell: bash
         run: node scripts/bump-version.js "${GITHUB_REF_NAME}"
 
-      - name: Build release (Windows)
+      - name: Build Tauri release (Windows)
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-          SYNCBOARD_GH_OWNER: ${{ github.repository_owner }}
-          SYNCBOARD_GH_REPO: ${{ github.event.repository.name }}
-        run: |
-          npm run build
-          cd server && npm install --omit=dev --no-audit --no-fund
-          cd ../desktop
-          npm install --no-audit --no-fund
-          node generate-icons.js
-          rm -rf resources && mkdir -p resources/server resources/client
-          cp -r ../server/dist resources/server/
-          cp ../server/package.json resources/server/
-          cp ../release.config.json resources/server/
-          cp -r ../server/node_modules resources/server/
-          cp -r ../client/dist/* resources/client/
-          ELECTRON_VERSION=$(node -p "require('./node_modules/electron/package.json').version")
-          npx @electron/rebuild -v "$ELECTRON_VERSION" -m . -w better-sqlite3 -p resources/server
-          npx electron-builder --win nsis zip --x64 --publish never
-          node ../scripts/write-latest-json.js
+        run: npx tauri build --bundles nsis
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
           path: |
-            desktop/release/*.exe
-            desktop/release/*-win.zip
-            desktop/release/*.zip
-            desktop/release/latest*.yml
-            desktop/release/latest.json
+            target/release/bundle/nsis/*.exe
 
   publish:
     needs: [build-linux, build-mac, build-windows]
@@ -204,10 +125,10 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p dist-release
-          find artifacts -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.deb' -o -name '*.exe' -o -name 'latest*.yml' -o -name 'latest.json' \) -exec cp {} dist-release/ \;
+          find artifacts -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.exe' \) -exec cp {} dist-release/ \;
           ls -lah dist-release
 
-      - name: Merge latest.json
+      - name: Generate latest.json
         run: |
           node <<'EOF'
           const fs = require('fs');
@@ -228,9 +149,8 @@ jobs:
           const macDmg = pick(/\.dmg$/i);
           const macZip = pick(/-mac\.zip$/i, /darwin.*\.zip$/i);
           const linuxAppImage = pick(/\.AppImage$/i);
-          const linuxTar = pick(/linux.*\.tar\.gz$/i, /\.tar\.gz$/i);
-          const winSetup = pick(/Setup.*\.exe$/i, /\.exe$/i);
-          const winZip = pick(/-win\.zip$/i, /windows.*\.zip$/i, /win32.*\.zip$/i);
+          const linuxDeb = pick(/\.deb$/i);
+          const winSetup = pick(/setup.*\.exe$/i, /\.exe$/i);
           const androidApk = pick(/-arm64\.apk$/i, /\.apk$/i);
           let downloadPage = process.env.SYNCBOARD_DOWNLOAD_URL || '';
           try {
@@ -241,25 +161,15 @@ jobs:
             publishedAt: new Date().toISOString(),
             downloadPage,
             github: { owner, repo, tag: `v${version}` },
-            roadmap: {
-              android: androidApk
-                ? { status: 'available', available: true, note: 'APK nativo arm64' }
-                : {
-                    status: 'roadmap',
-                    available: false,
-                    note: 'Gere localmente: ./scripts/build-android.sh && ./scripts/publish-android-apk.sh',
-                  },
-            },
             assets: {
               macDmg: macDmg ? `${base}/${macDmg}` : null,
               macZip: macZip ? `${base}/${macZip}` : null,
               linuxAppImage: linuxAppImage ? `${base}/${linuxAppImage}` : null,
-              linuxTar: linuxTar ? `${base}/${linuxTar}` : null,
+              linuxDeb: linuxDeb ? `${base}/${linuxDeb}` : null,
               winSetup: winSetup ? `${base}/${winSetup}` : null,
-              winZip: winZip ? `${base}/${winZip}` : null,
               androidApk: androidApk ? `${base}/${androidApk}` : null,
             },
-            files: { macDmg, macZip, linuxAppImage, linuxTar, winSetup, winZip, androidApk },
+            files: { macDmg, macZip, linuxAppImage, linuxDeb, winSetup, androidApk },
           };
           fs.writeFileSync(path.join(dir, 'latest.json'), JSON.stringify(latest, null, 2));
           console.log(latest);

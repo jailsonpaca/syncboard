@@ -1,6 +1,6 @@
 {
   "name": "syncboard",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Clipboard sync across Mac, Linux and Android on local network",
   "scripts": {
@@ -19,9 +19,15 @@
     "android:build": "bash scripts/build-android.sh",
     "android:publish": "bash scripts/publish-android-apk.sh",
     "serve:releases": "python3 -m http.server 8788 --bind 0.0.0.0 --directory desktop/release",
-    "daemon": "cd daemon && npm start"
+    "daemon": "cd daemon && npm start",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "rust:test": "cargo test --workspace",
+    "rust:server": "cargo run --release -p syncboard-server",
+    "rust:migrate": "cargo run --release -p syncboard-server -- migrate"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.6",
     "concurrently": "^9.1.2"
   }
 }

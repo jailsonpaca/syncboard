@@ -36,8 +36,18 @@ export function setDeviceName(name: string): void {
 
 export function getServerUrl(): string {
   const saved = localStorage.getItem(SERVER_KEY);
-  if (saved) return saved.replace(/\/$/, '');
-  return window.location.origin;
+  if (saved && /^https?:\/\//i.test(saved) && !saved.includes('tauri.localhost')) {
+    return saved.replace(/\/$/, '');
+  }
+  const origin = window.location.origin;
+  if (
+    origin.startsWith('tauri:') ||
+    origin.includes('tauri.localhost') ||
+    !origin.startsWith('http')
+  ) {
+    return 'http://127.0.0.1:8787';
+  }
+  return origin;
 }
 
 export function setServerUrl(url: string): void {
