@@ -242,6 +242,22 @@ pub fn start_clipboard_watcher(app: AppHandle, shared: Arc<AppShared>) {
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
+    // Linux/X11: o watcher nativo pode morrer sem aviso. Polling de 1s como garantia;
+    // o dedup por hash (recent_hashes) evita itens duplicados.
+    #[cfg(target_os = "linux")]
+    {
+        let tx_poll = tx.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                tick.tick().await;
+                if tx_poll.send(()).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
     // Thread leve dedicada ao watcher nativo do SO
     std::thread::Builder::new()
         .name("syncboard-clipboard-watcher".into())
@@ -255,9 +271,13 @@ pub fn start_clipboard_watcher(app: AppHandle, shared: Arc<AppShared>) {
                 }
             }
 
-            if let Ok(mut watcher) = ClipboardWatcherContext::new() {
-                let _ = watcher.add_handler(Handler { tx });
-                watcher.start_watch();
+            match ClipboardWatcherContext::new() {
+                Ok(mut watcher) => {
+                    let _ = watcher.add_handler(Handler { tx });
+                    watcher.start_watch();
+                    tracing::warn!("[clipboard] watcher nativo encerrou");
+                }
+                Err(e) => tracing::warn!("[clipboard] watcher nativo indisponível: {e}"),
             }
         })
         .ok();
