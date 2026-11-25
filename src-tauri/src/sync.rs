@@ -2,9 +2,10 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+#[cfg(not(target_os = "linux"))]
 use clipboard_rs::{ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext};
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
@@ -135,21 +136,31 @@ async fn start_embedded_server(app: AppHandle, shared: Arc<AppShared>, port: u16
     });
 }
 
+/// Intervalo de ping do cliente e tempo máximo sem receber nada antes de considerar a conexão
+/// morta (conexão meio aberta após suspensão ou queda de Wi-Fi).
+const WS_PING_EVERY: Duration = Duration::from_secs(20);
+const WS_IDLE_TIMEOUT: Duration = Duration::from_secs(50);
+const WS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 fn start_remote_ws_client(app: AppHandle, shared: Arc<AppShared>) {
     let (stop_tx, mut stop_rx) = watch::channel(false);
     *shared.remote_stop.lock().unwrap() = Some(stop_tx);
 
     tokio::spawn(async move {
+        let mut was_connected = false;
         loop {
             if *stop_rx.borrow() {
                 break;
             }
             let ws_url = shared.ws_url();
             let device_name = shared.get_config().device_name;
-            match tokio_tungstenite::connect_async(&ws_url).await {
-                Ok((ws_stream, _)) => {
+            match tokio::time::timeout(WS_CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&ws_url)).await {
+                Ok(Ok((ws_stream, _))) => {
+                    tracing::info!("[ws] conectado em {ws_url}");
                     shared.connected.store(true, Ordering::Relaxed);
+                    was_connected = true;
                     refresh_tray_menu(&app, &shared);
+                    flush_pending_publish(&app, &shared);
 
                     let (mut write, mut read) = ws_stream.split();
                     let hello = serde_json::json!({
@@ -159,28 +170,64 @@ fn start_remote_ws_client(app: AppHandle, shared: Arc<AppShared>) {
                     .to_string();
                     let _ = write.send(WsMsg::Text(hello.into())).await;
 
-                    loop {
+                    let mut ping = tokio::time::interval(WS_PING_EVERY);
+                    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    let mut last_rx = tokio::time::Instant::now();
+
+                    let reason = loop {
                         tokio::select! {
                             _ = stop_rx.changed() => {
                                 if *stop_rx.borrow() { return; }
                             }
+                            _ = ping.tick() => {
+                                if last_rx.elapsed() > WS_IDLE_TIMEOUT {
+                                    break format!("sem resposta há {:?}", last_rx.elapsed());
+                                }
+                                if let Err(e) = write.send(WsMsg::Ping(Vec::new().into())).await {
+                                    break format!("falha ao enviar ping: {e}");
+                                }
+                            }
                             frame = read.next() => {
+                                last_rx = tokio::time::Instant::now();
                                 match frame {
                                     Some(Ok(WsMsg::Text(text))) => {
-                                        if let Ok(msg) = serde_json::from_str::<WsMessage>(&text) {
-                                            handle_incoming_ws_message(&app, &shared, msg).await;
+                                        match serde_json::from_str::<WsMessage>(&text) {
+                                            Ok(msg) => {
+                                                handle_incoming_ws_message(&app, &shared, msg).await;
+                                                // Aplicar um item grande pode demorar; não conta como silêncio.
+                                                last_rx = tokio::time::Instant::now();
+                                            }
+                                            Err(e) => tracing::debug!("[ws] mensagem ignorada: {e}"),
                                         }
                                     }
-                                    Some(Ok(WsMsg::Close(_))) | Some(Err(_)) | None => break,
+                                    Some(Ok(WsMsg::Close(_))) | None => break "fechada pelo servidor".to_string(),
+                                    Some(Err(e)) => break format!("erro: {e}"),
                                     _ => {}
                                 }
                             }
                         }
+                    };
+                    tracing::warn!("[ws] conexão perdida ({reason}); reconectando");
+                    shared.connected.store(false, Ordering::Relaxed);
+                    refresh_tray_menu(&app, &shared);
+                }
+                Ok(Err(e)) => {
+                    if was_connected {
+                        tracing::warn!("[ws] falha ao conectar em {ws_url}: {e}");
+                    } else {
+                        tracing::debug!("[ws] falha ao conectar em {ws_url}: {e}");
+                    }
+                    was_connected = false;
+                    if shared.connected.swap(false, Ordering::Relaxed) {
+                        refresh_tray_menu(&app, &shared);
                     }
                 }
                 Err(_) => {
-                    shared.connected.store(false, Ordering::Relaxed);
-                    refresh_tray_menu(&app, &shared);
+                    tracing::warn!("[ws] tempo esgotado ao conectar em {ws_url}");
+                    was_connected = false;
+                    if shared.connected.swap(false, Ordering::Relaxed) {
+                        refresh_tray_menu(&app, &shared);
+                    }
                 }
             }
 
@@ -228,37 +275,68 @@ async fn handle_incoming_ws_message(app: &AppHandle, shared: &Arc<AppShared>, ms
 }
 
 /// Inicia o watcher nativo de clipboard do SO (NSPasteboard.changeCount no macOS,
-/// AddClipboardFormatListener no Windows, X11/Wayland no Linux).
+/// AddClipboardFormatListener no Windows, XFixes no Linux/X11).
+///
+/// Não há polling: a leitura do conteúdo só acontece quando o SO avisa que a área de
+/// transferência mudou. Os watchers são supervisionados e reiniciados com backoff.
 pub fn start_clipboard_watcher(app: AppHandle, shared: Arc<AppShared>) {
-    // Marca o estado inicial da clipboard para não enviar o que já estava copiado antes do app abrir
-    if let Some(initial) = read_system_clipboard() {
-        let h = match &initial {
-            ClipboardCapture::Text { hash, .. } => hash,
-            ClipboardCapture::Image { hash, .. } => hash,
-            ClipboardCapture::File { hash, .. } => hash,
-        };
-        shared.recent_hashes.remember(h);
-    }
-
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
-    // Linux/X11: o watcher nativo pode morrer sem aviso. Polling de 1s como garantia;
-    // o dedup por hash (recent_hashes) evita itens duplicados.
     #[cfg(target_os = "linux")]
-    {
-        let tx_poll = tx.clone();
-        tokio::spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_secs(1));
-            loop {
-                tick.tick().await;
-                if tx_poll.send(()).is_err() {
-                    break;
-                }
-            }
-        });
-    }
+    crate::x11_watch::spawn(tx);
 
-    // Thread leve dedicada ao watcher nativo do SO
+    #[cfg(not(target_os = "linux"))]
+    spawn_native_watcher(tx);
+
+    tokio::spawn(async move {
+        // Marca o estado inicial da clipboard para não enviar o que já estava copiado antes do
+        // app abrir. Feito aqui, depois de o watcher já estar ativo: mudanças ocorridas durante
+        // esta leitura ficam na fila e são processadas em seguida (antes se perdiam).
+        let initial = tokio::task::spawn_blocking(read_system_clipboard)
+            .await
+            .ok()
+            .flatten();
+        if let Some(initial) = initial {
+            shared.dedup.mark_seen(initial.hash());
+        }
+
+        while rx.recv().await.is_some() {
+            // Pequeno debounce (120ms) para apps que escrevem múltiplos formatos na sequência
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            while rx.try_recv().is_ok() {}
+
+            if !shared.get_config().auto_sync {
+                continue;
+            }
+
+            let t_read = std::time::Instant::now();
+            let captured = {
+                // Serializa com escritas vindas do remoto (ver apply_remote_item_to_clipboard)
+                let _io = shared.clip_io.lock().await;
+                tokio::task::spawn_blocking(read_system_clipboard)
+                    .await
+                    .ok()
+                    .flatten()
+            };
+
+            let Some(cap) = captured else {
+                tracing::debug!("[clipboard] nada legível ({:?})", t_read.elapsed());
+                continue;
+            };
+            tracing::debug!("[clipboard] lido {} em {:?}", cap.kind(), t_read.elapsed());
+            if !shared.dedup.observe(cap.hash()) {
+                tracing::debug!("[clipboard] {} ignorado (repetido ou eco)", cap.kind());
+                continue;
+            }
+
+            publish_with_retry(&app, &shared, cap).await;
+        }
+    });
+}
+
+/// Watcher da clipboard-rs (macOS/Windows), reiniciado com backoff se terminar.
+#[cfg(not(target_os = "linux"))]
+fn spawn_native_watcher(tx: tokio::sync::mpsc::UnboundedSender<()>) {
     std::thread::Builder::new()
         .name("syncboard-clipboard-watcher".into())
         .spawn(move || {
@@ -271,49 +349,93 @@ pub fn start_clipboard_watcher(app: AppHandle, shared: Arc<AppShared>) {
                 }
             }
 
-            match ClipboardWatcherContext::new() {
-                Ok(mut watcher) => {
-                    let _ = watcher.add_handler(Handler { tx });
-                    watcher.start_watch();
-                    tracing::warn!("[clipboard] watcher nativo encerrou");
+            let mut backoff = Duration::from_secs(1);
+            loop {
+                if tx.is_closed() {
+                    return;
                 }
-                Err(e) => tracing::warn!("[clipboard] watcher nativo indisponível: {e}"),
+                match ClipboardWatcherContext::new() {
+                    Ok(mut watcher) => {
+                        let _ = watcher.add_handler(Handler { tx: tx.clone() });
+                        watcher.start_watch();
+                        tracing::warn!("[clipboard] watcher nativo encerrou; reiniciando em {backoff:?}");
+                    }
+                    Err(e) => tracing::warn!("[clipboard] watcher nativo indisponível: {e}"),
+                }
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(Duration::from_secs(60));
             }
         })
         .ok();
+}
 
-    tokio::spawn(async move {
-        while rx.recv().await.is_some() {
-            // Pequeno debounce (120ms) para apps que escrevem múltiplos formatos na sequência
-            tokio::time::sleep(Duration::from_millis(120)).await;
-            while rx.try_recv().is_ok() {}
-
-            if !shared.get_config().auto_sync {
-                continue;
-            }
-
-            let captured = tokio::task::spawn_blocking(read_system_clipboard)
-                .await
-                .ok()
-                .flatten();
-
-            let Some(cap) = captured else { continue };
-            let hash = match &cap {
-                ClipboardCapture::Text { hash, .. } => hash.clone(),
-                ClipboardCapture::Image { hash, .. } => hash.clone(),
-                ClipboardCapture::File { hash, .. } => hash.clone(),
-            };
-
-            if shared.recent_hashes.contains(&hash) {
-                continue;
-            }
-            shared.recent_hashes.remember(&hash);
-
-            if let Err(e) = publish_local_capture(&app, &shared, cap).await {
-                tracing::warn!("[clipboard] falha ao publicar captura: {e}");
+/// Publica uma captura local tentando de novo em falhas transitórias. Se todas as tentativas
+/// falharem, a captura fica pendente e é reenviada quando o WebSocket reconectar.
+async fn publish_with_retry(app: &AppHandle, shared: &Arc<AppShared>, cap: ClipboardCapture) {
+    const DELAYS: [u64; 4] = [0, 2, 5, 10];
+    let kind = cap.kind();
+    let hash = cap.hash().to_string();
+    let mut last_err = String::new();
+    for (i, delay) in DELAYS.iter().enumerate() {
+        if *delay > 0 {
+            tokio::time::sleep(Duration::from_secs(*delay)).await;
+            // Se o usuário copiou outra coisa nesse meio tempo, esta captura ficou velha.
+            if shared.dedup.last_seen().as_deref() != Some(hash.as_str()) {
+                tracing::info!("[sync] {kind} substituído por cópia mais nova; abandonando reenvio");
+                return;
             }
         }
-    });
+        match publish_local_capture(app, shared, cap.clone()).await {
+            Ok(()) => {
+                tracing::info!(
+                    "[sync] {kind} enviado (tentativa {}, hash {})",
+                    i + 1,
+                    &hash[..hash.len().min(10)]
+                );
+                if shared.pending_publish.lock().unwrap_or_else(|e| e.into_inner()).take().is_some() {
+                    tracing::debug!("[sync] pendência anterior descartada");
+                }
+                return;
+            }
+            Err(e) => {
+                tracing::warn!("[sync] falha ao enviar {kind} (tentativa {}): {e}", i + 1);
+                last_err = e;
+            }
+        }
+    }
+    tracing::error!("[sync] {kind} NÃO enviado após {} tentativas: {last_err}; fica pendente até reconectar", DELAYS.len());
+    shared.dedup.forget(&hash);
+    *shared.pending_publish.lock().unwrap_or_else(|e| e.into_inner()) = Some(cap);
+}
+
+/// Reenvia a captura pendente (chamado quando o WebSocket conecta).
+fn flush_pending_publish(app: &AppHandle, shared: &Arc<AppShared>) {
+    let pending = shared.pending_publish.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(cap) = pending {
+        // Só reenvia se ainda for o conteúdo atual (ou se nada mais novo foi visto).
+        let last = shared.dedup.last_seen();
+        if last.is_some() && last.as_deref() != Some(cap.hash()) {
+            return;
+        }
+        shared.dedup.mark_seen(cap.hash());
+        tracing::info!("[sync] reenviando {} pendente após reconectar", cap.kind());
+        let app = app.clone();
+        let shared = Arc::clone(shared);
+        tokio::spawn(async move {
+            publish_with_retry(&app, &shared, cap).await;
+        });
+    }
+}
+
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(120))
+            .build()
+            .expect("cliente HTTP")
+    })
 }
 
 async fn publish_local_capture(
@@ -409,10 +531,7 @@ async fn publish_local_capture(
     }
 
     // Modo cliente remoto: envia via HTTP para o servidor configurado
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = http_client();
     let api = shared.api_base();
 
     match cap {
@@ -426,6 +545,7 @@ async fn publish_local_capture(
                 }))
                 .send()
                 .await
+                .and_then(|r| r.error_for_status())
                 .map_err(|e| e.to_string())?;
         }
         ClipboardCapture::Image { png_bytes, .. } => {
@@ -442,6 +562,7 @@ async fn publish_local_capture(
                 .multipart(form)
                 .send()
                 .await
+                .and_then(|r| r.error_for_status())
                 .map_err(|e| e.to_string())?;
         }
         ClipboardCapture::File {
@@ -464,6 +585,7 @@ async fn publish_local_capture(
                 .multipart(form)
                 .send()
                 .await
+                .and_then(|r| r.error_for_status())
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -477,8 +599,11 @@ async fn ensure_item_blob(shared: &Arc<AppShared>, item: &ClipItem) -> Result<Pa
         return Ok(p);
     }
     let url = format!("{}/items/{}/blob", shared.api_base(), item.id);
-    let bytes = reqwest::get(&url)
+    let bytes = http_client()
+        .get(&url)
+        .send()
         .await
+        .and_then(|r| r.error_for_status())
         .map_err(|e| e.to_string())?
         .bytes()
         .await
@@ -493,22 +618,31 @@ pub async fn apply_remote_item_to_clipboard(
     shared: &Arc<AppShared>,
     item: &ClipItem,
 ) -> Result<(bool, Option<PathBuf>), String> {
+    // Baixa o blob antes de travar a clipboard (pode demorar).
+    let blob_path = match item.item_type {
+        ItemType::Text => None,
+        _ => Some(ensure_item_blob(shared, item).await?),
+    };
+    // Enquanto escreve (e lê de volta), o watcher não lê: assim o eco é reconhecido.
+    let _io = shared.clip_io.lock().await;
     match item.item_type {
         ItemType::Text => {
             let text = item.content.clone().unwrap_or_default();
             if text.is_empty() {
                 return Ok((false, None));
             }
-            shared.recent_hashes.remember(&hash_text(text.trim()));
+            shared.dedup.note_own_write(&hash_text(text.trim()));
             tokio::task::spawn_blocking(move || write_clipboard_text(&text))
                 .await
                 .map_err(|e| e.to_string())??;
             Ok((true, None))
         }
         ItemType::Image => {
-            let blob_path = ensure_item_blob(shared, item).await?;
+            let Some(blob_path) = blob_path else {
+                return Err("blob ausente".into());
+            };
             let bytes = tokio::fs::read(&blob_path).await.map_err(|e| e.to_string())?;
-            shared.recent_hashes.remember(&hash_image(&bytes));
+            shared.dedup.note_own_write(&hash_image(&bytes));
             tokio::task::spawn_blocking(move || write_clipboard_image(&bytes))
                 .await
                 .map_err(|e| e.to_string())??;
@@ -519,12 +653,14 @@ pub async fn apply_remote_item_to_clipboard(
                     .ok()
                     .flatten()
             {
-                shared.recent_hashes.remember(&hash);
+                shared.dedup.note_own_write(&hash);
             }
             Ok((true, Some(blob_path)))
         }
         ItemType::File => {
-            let blob_path = ensure_item_blob(shared, item).await?;
+            let Some(blob_path) = blob_path else {
+                return Err("blob ausente".into());
+            };
             let filename = item
                 .filename
                 .clone()
@@ -538,8 +674,8 @@ pub async fn apply_remote_item_to_clipboard(
                     .map(|d| d.as_millis())
                     .unwrap_or(0);
                 shared
-                    .recent_hashes
-                    .remember(&hash_file(&inbox_path, meta.len(), mtime_ms));
+                    .dedup
+                    .note_own_write(&hash_file(&inbox_path, meta.len(), mtime_ms));
             }
             let p_clone = inbox_path.clone();
             let wrote = tokio::task::spawn_blocking(move || write_clipboard_files(&[p_clone]))

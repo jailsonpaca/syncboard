@@ -10,7 +10,7 @@ use syncboard_core::store::ClipStore;
 use syncboard_core::update::UpdateChecker;
 use tokio::sync::watch;
 
-use crate::clipboard::RecentHashes;
+use crate::clipboard::{ClipDedup, ClipboardCapture};
 use crate::recorder::ScreenRecorder;
 use crate::video::VideoConverter;
 
@@ -24,7 +24,12 @@ pub struct AppShared {
     pub server_stop: Mutex<Option<watch::Sender<bool>>>,
     pub remote_stop: Mutex<Option<watch::Sender<bool>>>,
     pub updater: Arc<UpdateChecker>,
-    pub recent_hashes: RecentHashes,
+    /// Decide o que publicar (último visto + eco do que o app escreveu).
+    pub dedup: ClipDedup,
+    /// Serializa leitura do watcher com escrita de itens remotos na clipboard.
+    pub clip_io: tokio::sync::Mutex<()>,
+    /// Captura que não pôde ser enviada; reenviada quando o WebSocket reconectar.
+    pub pending_publish: Mutex<Option<ClipboardCapture>>,
     pub connected: AtomicBool,
     pub video: VideoConverter,
     pub recorder: ScreenRecorder,

@@ -7,6 +7,8 @@ mod sync;
 mod tray;
 mod video;
 mod windows;
+#[cfg(target_os = "linux")]
+mod x11_watch;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -20,7 +22,7 @@ use syncboard_core::update::UpdateChecker;
 use tauri::{Manager, RunEvent};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 
-use crate::clipboard::RecentHashes;
+use crate::clipboard::ClipDedup;
 use crate::commands::register_global_hotkey;
 use crate::config::{app_data_root, load_config};
 use crate::recorder::ScreenRecorder;
@@ -47,11 +49,68 @@ fn resolve_client_dist(app: &tauri::AppHandle) -> Option<PathBuf> {
     None
 }
 
+/// Log em stdout e em `<app_data>/logs/syncboard.YYYY-MM-DD.log` (rotação diária, 7 arquivos),
+/// e um panic hook que grava local + backtrace antes do abort (`panic = "abort"` no release).
+fn init_logging(log_dir: &std::path::Path) {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let file_layer = std::fs::create_dir_all(log_dir)
+        .ok()
+        .and_then(|_| {
+            tracing_appender::rolling::Builder::new()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .filename_prefix("syncboard")
+                .filename_suffix("log")
+                .max_log_files(7)
+                .build(log_dir)
+                .ok()
+        })
+        .map(|appender| fmt::layer().with_ansi(false).with_writer(Mutex::new(appender)));
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer())
+        .with(file_layer)
+        .try_init();
+
+    let crash_file = log_dir.join("crash.log");
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let thread = std::thread::current();
+        let bt = std::backtrace::Backtrace::force_capture();
+        let msg = format!(
+            "[{}] PANIC na thread '{}' (v{}): {info}\n{bt}\n",
+            chrono_like_now(),
+            thread.name().unwrap_or("?"),
+            env!("CARGO_PKG_VERSION")
+        );
+        tracing::error!("{msg}");
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&crash_file) {
+            use std::io::Write;
+            let _ = f.write_all(msg.as_bytes());
+            let _ = f.sync_all();
+        }
+        default_hook(info);
+    }));
+
+    tracing::info!("SyncBoard v{} iniciando (log em {})", env!("CARGO_PKG_VERSION"), log_dir.display());
+}
+
+fn chrono_like_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("unix {secs}")
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = tracing_subscriber::fmt().try_init();
-
     let app_root = app_data_root();
+    init_logging(&app_root.join("logs"));
     let data_dir = app_root.join("data");
     let config_path = app_root.join("config.json");
 
@@ -91,7 +150,9 @@ pub fn run() {
         server_stop: Mutex::new(None),
         remote_stop: Mutex::new(None),
         updater,
-        recent_hashes: RecentHashes::new(),
+        dedup: ClipDedup::new(),
+        clip_io: tokio::sync::Mutex::new(()),
+        pending_publish: Mutex::new(None),
         connected: AtomicBool::new(false),
         video: VideoConverter::default(),
         recorder: ScreenRecorder::default(),
@@ -152,7 +213,9 @@ pub fn run() {
                 server_stop: Mutex::new(None),
                 remote_stop: Mutex::new(None),
                 updater: Arc::clone(&shared.updater),
-                recent_hashes: RecentHashes::new(),
+                dedup: ClipDedup::new(),
+        clip_io: tokio::sync::Mutex::new(()),
+        pending_publish: Mutex::new(None),
                 connected: AtomicBool::new(false),
                 video: VideoConverter::default(),
                 recorder: ScreenRecorder::default(),
